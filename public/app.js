@@ -7,6 +7,16 @@ const COLORS = {
   eraser: '#ff8800'
 };
 
+const FIX_COLORS = {
+  4: '#44ff44',  // RTK Fix — green
+  5: '#ffcc00',  // RTK Float — yellow
+  2: '#ff8800',  // DGPS — orange
+  1: '#ff4444',  // GPS — red
+  0: '#888888',  // No fix — gray
+};
+
+const GPS_WS_URL = 'ws://localhost:8765';
+const GPS_TRAIL_MAX = 3000;
 const SNAP_DISTANCE_PX = 20;
 
 let map;
@@ -22,6 +32,60 @@ let eraserMarkers = [];
 let lineCounter = 0;
 let connectorCounter = 0;
 let eraserRadius = 8;
+
+// GPS state
+let gpsMarker = null;
+let gpsTrail = [];
+let gpsFollowing = true;
+let gpsWs = null;
+let gpsHzCounter = 0;
+let gpsHzValue = 0;
+let gpsHzInterval = null;
+let gpsPointCount = 0;
+
+// --- Auto-save ---
+
+let autoSaveTimer = null;
+
+function scheduleAutoSave() {
+  if (autoSaveTimer) clearTimeout(autoSaveTimer);
+  autoSaveTimer = setTimeout(doAutoSave, 500);
+}
+
+async function doAutoSave() {
+  const data = {
+    annotations: annotations.map(ann => ({
+      id: ann.id,
+      name: ann.name,
+      type: ann.type,
+      points: ann.points.map(p => ({ lat: p.lat, lng: p.lng }))
+    })),
+    connectors: connectors.map(conn => ({
+      id: conn.id,
+      name: conn.name,
+      type: conn.type,
+      points: conn.points.map(p => ({ lat: p.lat, lng: p.lng }))
+    })),
+    eraserPoints: eraserPoints.map(ep => ({
+      id: ep.id,
+      lat: ep.lat,
+      lng: ep.lng,
+      radius: ep.radius
+    })),
+    metadata: {
+      savedAt: new Date().toISOString(),
+      campus: 'Stanford University',
+      project: 'FollowRTK Self-Driving Golf Cart'
+    }
+  };
+  try {
+    await fetch('/api/save', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+  } catch (e) {}
+}
 
 // --- Geo math ---
 
@@ -213,6 +277,162 @@ function renderCenterLines() {
   });
 }
 
+// --- Live GPS ---
+
+function initGpsMarker() {
+  const el = document.createElement('div');
+  el.className = 'gps-dot';
+  el.style.background = FIX_COLORS[0];
+  gpsMarker = new mapboxgl.Marker({ element: el })
+    .setLngLat([-122.1697, 37.4275])
+    .addTo(map);
+}
+
+function initGpsTrailSource() {
+  map.addSource('gps-trail', {
+    type: 'geojson',
+    data: { type: 'FeatureCollection', features: [] }
+  });
+  map.addLayer({
+    id: 'gps-trail-layer',
+    type: 'line',
+    source: 'gps-trail',
+    paint: {
+      'line-color': ['get', 'color'],
+      'line-width': 3,
+      'line-opacity': 0.8
+    },
+    layout: { 'line-cap': 'round', 'line-join': 'round' }
+  });
+}
+
+function updateGpsTrailOnMap() {
+  if (!map.getSource('gps-trail')) return;
+  const features = [];
+  for (let i = 1; i < gpsTrail.length; i++) {
+    const prev = gpsTrail[i - 1];
+    const curr = gpsTrail[i];
+    features.push({
+      type: 'Feature',
+      properties: { color: FIX_COLORS[curr.fix_code] || FIX_COLORS[0] },
+      geometry: {
+        type: 'LineString',
+        coordinates: [[prev.lon, prev.lat], [curr.lon, curr.lat]]
+      }
+    });
+  }
+  map.getSource('gps-trail').setData({ type: 'FeatureCollection', features });
+}
+
+function onGpsPosition(data) {
+  gpsHzCounter++;
+  gpsPointCount++;
+  document.getElementById('gps-point-count').textContent = `${gpsPointCount} points collected`;
+
+  gpsTrail.push(data);
+  if (gpsTrail.length > GPS_TRAIL_MAX) {
+    gpsTrail = gpsTrail.slice(-GPS_TRAIL_MAX);
+  }
+
+  if (gpsMarker) {
+    gpsMarker.setLngLat([data.lon, data.lat]);
+    gpsMarker.getElement().style.background = FIX_COLORS[data.fix_code] || FIX_COLORS[0];
+  }
+
+  if (gpsFollowing && map) {
+    map.easeTo({ center: [data.lon, data.lat], duration: 80 });
+  }
+
+  updateGpsTrailOnMap();
+  updateGpsPanel(data);
+}
+
+function updateGpsPanel(d) {
+  const badge = document.getElementById('gps-fix-badge');
+  badge.textContent = d.fix;
+  badge.className = 'fix-badge';
+  if (d.fix_code === 4) badge.classList.add('rtk-fix');
+  else if (d.fix_code === 5) badge.classList.add('rtk-float');
+  else if (d.fix_code === 2) badge.classList.add('dgps');
+  else if (d.fix_code >= 1) badge.classList.add('gps');
+
+  document.getElementById('gps-lat').textContent = d.lat.toFixed(8);
+  document.getElementById('gps-lon').textContent = d.lon.toFixed(8);
+  document.getElementById('gps-sats').textContent = d.sats;
+  document.getElementById('gps-hdop').textContent = d.hdop.toFixed(2);
+  document.getElementById('gps-alt').textContent = d.alt.toFixed(1) + 'm';
+  document.getElementById('gps-hz').textContent = gpsHzValue > 0 ? `${gpsHzValue} Hz` : '';
+}
+
+function connectGpsWebSocket() {
+  const statusEl = document.getElementById('gps-status');
+
+  gpsWs = new WebSocket(GPS_WS_URL);
+
+  gpsWs.onopen = () => {
+    statusEl.classList.remove('disconnected');
+    setStatus('GPS connected.');
+
+    gpsHzInterval = setInterval(() => {
+      gpsHzValue = gpsHzCounter;
+      gpsHzCounter = 0;
+      const hzEl = document.getElementById('gps-hz');
+      if (hzEl) hzEl.textContent = gpsHzValue > 0 ? `${gpsHzValue} Hz` : '';
+    }, 1000);
+  };
+
+  gpsWs.onmessage = (event) => {
+    const msg = JSON.parse(event.data);
+    if (msg.type === 'position') {
+      onGpsPosition(msg.data);
+    } else if (msg.type === 'history') {
+      for (const pt of msg.data) {
+        gpsTrail.push(pt);
+      }
+      gpsPointCount = msg.data.length;
+      document.getElementById('gps-point-count').textContent = `${gpsPointCount} points collected`;
+      if (gpsTrail.length > GPS_TRAIL_MAX) {
+        gpsTrail = gpsTrail.slice(-GPS_TRAIL_MAX);
+      }
+      updateGpsTrailOnMap();
+      if (gpsTrail.length > 0) {
+        const last = gpsTrail[gpsTrail.length - 1];
+        if (gpsMarker) gpsMarker.setLngLat([last.lon, last.lat]);
+        updateGpsPanel(last);
+        if (gpsFollowing) map.flyTo({ center: [last.lon, last.lat], zoom: 19 });
+      }
+    } else if (msg.type === 'saved') {
+      setStatus(`Saved ${msg.count} GPS points to ${msg.path.split('/').pop()}`);
+    } else if (msg.type === 'cleared') {
+      gpsTrail = [];
+      gpsPointCount = 0;
+      document.getElementById('gps-point-count').textContent = '0 points collected';
+      updateGpsTrailOnMap();
+      setStatus('GPS points cleared.');
+    }
+  };
+
+  gpsWs.onclose = () => {
+    statusEl.classList.add('disconnected');
+    clearInterval(gpsHzInterval);
+    gpsHzValue = 0;
+    document.getElementById('gps-hz').textContent = '';
+    document.getElementById('gps-fix-badge').textContent = 'OFFLINE';
+    document.getElementById('gps-fix-badge').className = 'fix-badge';
+    setTimeout(connectGpsWebSocket, 2000);
+  };
+
+  gpsWs.onerror = () => {
+    gpsWs.close();
+  };
+}
+
+function clearGpsTrail() {
+  gpsTrail = [];
+  updateGpsTrailOnMap();
+  setStatus('GPS trail cleared.');
+}
+
 // --- Map ---
 
 async function initMap() {
@@ -233,11 +453,19 @@ async function initMap() {
 
   map.on('load', () => {
     map.on('click', onMapClick);
+    initGpsMarker();
+    initGpsTrailSource();
+    connectGpsWebSocket();
     loadAnnotations().then(() => {
       if (annotations.length === 0) {
-        setStatus('Click "New Line" to start annotating lane boundaries.');
+        setStatus('Connecting to GPS...');
       }
     });
+  });
+
+  map.on('dragstart', () => {
+    gpsFollowing = false;
+    document.getElementById('btn-follow').classList.remove('active');
   });
 }
 
@@ -249,6 +477,7 @@ function onMapClick(e) {
     eraserPoints.push(ep);
     addEraserMarker(ep);
     renderCenterLines();
+    scheduleAutoSave();
     setStatus(`Placed eraser (${eraserRadius}m radius). ${eraserPoints.length} total.`);
     return;
   }
@@ -267,6 +496,7 @@ function onMapClick(e) {
     addConnectorMarker(addedPoint, conn.points.length - 1, conn.id, !!snapped);
     updateConnectorLine(conn);
     updateConnectorList();
+    scheduleAutoSave();
     setStatus(snapped
       ? `Snapped to lane point (${conn.points.length} pts)`
       : `Added free point (${conn.points.length} pts) — no nearby lane point to snap to`);
@@ -286,6 +516,7 @@ function onMapClick(e) {
   updateLine(annotation);
   renderCenterLines();
   updateAnnotationList();
+  scheduleAutoSave();
   setStatus(`Added point ${annotation.points.length} to "${annotation.name}"`);
 }
 
@@ -315,6 +546,7 @@ function addPointMarker(point, index, annotationId) {
       ann.points[marker._pointIndex] = { lat: lngLat.lat, lng: lngLat.lng };
       updateLine(ann);
       renderCenterLines();
+      scheduleAutoSave();
     }
   });
 
@@ -360,6 +592,7 @@ function addEraserMarker(ep) {
       point.lat = lngLat.lat;
       point.lng = lngLat.lng;
       renderCenterLines();
+      scheduleAutoSave();
     }
   });
 
@@ -376,6 +609,7 @@ function deleteEraserPoint(id) {
     return true;
   });
   renderCenterLines();
+  scheduleAutoSave();
   setStatus(`Deleted eraser. ${eraserPoints.length} remaining.`);
 }
 
@@ -384,6 +618,7 @@ function clearAllErasers() {
   eraserMarkers = [];
   eraserPoints = [];
   renderCenterLines();
+  scheduleAutoSave();
   setStatus('Cleared all erasers.');
 }
 
@@ -419,6 +654,7 @@ function addConnectorMarker(point, index, connectorId, snapped) {
       el.style.height = snappedPt ? '14px' : '10px';
       el.style.transform = snappedPt ? 'rotate(45deg)' : '';
       updateConnectorLine(conn);
+      scheduleAutoSave();
     }
   });
 
@@ -601,6 +837,7 @@ function finishLine() {
   activeAnnotationId = null;
   updateAnnotationList();
   renderCenterLines();
+  scheduleAutoSave();
   setStatus(`Finished "${name}". Click "New Line" to start another.`);
 }
 
@@ -621,6 +858,7 @@ function undoPoint() {
   updateLine(annotation);
   renderCenterLines();
   updateAnnotationList();
+  scheduleAutoSave();
   setStatus(`Removed last point. ${annotation.points.length} remaining.`);
 }
 
@@ -679,6 +917,7 @@ function undoConnectorPoint() {
   conn.points.forEach((pt, i) => addConnectorMarker(pt, i, conn.id, true));
   updateConnectorLine(conn);
   updateConnectorList();
+  scheduleAutoSave();
   setStatus(`Removed last connector point. ${conn.points.length} remaining.`);
 }
 
@@ -691,6 +930,7 @@ function deleteConnector(id) {
   connectors.splice(idx, 1);
   if (activeConnectorId === id) activeConnectorId = null;
   updateConnectorList();
+  scheduleAutoSave();
   setStatus(`Deleted connector "${name}".`);
 }
 
@@ -750,6 +990,7 @@ function deleteAnnotation(id) {
 
   updateAnnotationList();
   renderCenterLines();
+  scheduleAutoSave();
   setStatus(`Deleted "${name}".`);
 }
 
@@ -949,5 +1190,32 @@ document.getElementById('btn-undo-eraser').addEventListener('click', undoEraser)
 document.getElementById('btn-clear-erasers').addEventListener('click', clearAllErasers);
 document.getElementById('btn-save').addEventListener('click', saveAnnotations);
 document.getElementById('btn-load').addEventListener('click', loadAnnotations);
+
+document.getElementById('btn-save-gps').addEventListener('click', () => {
+  if (gpsWs && gpsWs.readyState === WebSocket.OPEN) {
+    const ts = new Date().toISOString().slice(0, 19).replace(/[T:]/g, '-');
+    gpsWs.send(JSON.stringify({ type: 'save', filename: `lane_points_${ts}.json` }));
+  } else {
+    setStatus('GPS not connected.');
+  }
+});
+
+document.getElementById('btn-clear-gps').addEventListener('click', () => {
+  if (gpsWs && gpsWs.readyState === WebSocket.OPEN) {
+    gpsWs.send(JSON.stringify({ type: 'clear' }));
+  }
+});
+
+document.getElementById('btn-follow').addEventListener('click', () => {
+  gpsFollowing = !gpsFollowing;
+  document.getElementById('btn-follow').classList.toggle('active', gpsFollowing);
+  if (gpsFollowing && gpsTrail.length > 0) {
+    const last = gpsTrail[gpsTrail.length - 1];
+    map.flyTo({ center: [last.lon, last.lat], zoom: 19 });
+  }
+  setStatus(gpsFollowing ? 'Following GPS. Drag map to stop.' : 'GPS follow off.');
+});
+
+document.getElementById('btn-clear-trail').addEventListener('click', clearGpsTrail);
 
 initMap();
