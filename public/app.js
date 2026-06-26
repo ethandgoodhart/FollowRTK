@@ -2029,6 +2029,50 @@ function downloadAnnotationsJson() {
   setStatus(`Downloaded ${annotations.length} lane(s), ${connectors.length} connector(s), ${manualCenterLines.length} manual centerline(s), ${eraserPoints.length} eraser(s)`);
 }
 
+async function autoLabelLanes() {
+  const candidates = annotations.filter(ann => ann.type === 'lane' && ann.points.length >= 2);
+  if (candidates.length === 0) {
+    setStatus('No lane boundaries with points to label.');
+    return;
+  }
+
+  setStatus(`Auto-labeling ${candidates.length} lane(s)...`);
+  try {
+    const res = await fetch('/api/autolabel', {
+      method: 'POST',
+      headers: syncHeaders(),
+      body: JSON.stringify(createRouteDocument())
+    });
+    const result = await res.json();
+    if (!res.ok) throw new Error(result.error || 'Auto-label failed');
+
+    const byId = new Map((result.suggestions || []).map(s => [s.id, s]));
+    let applied = 0;
+    let found = 0;
+    for (const ann of annotations) {
+      const suggestion = byId.get(ann.id);
+      if (!suggestion?.suggestedName) continue;
+      found++;
+      if (!suggestion.shouldApply || ann.name === suggestion.suggestedName) continue;
+      ann.name = suggestion.suggestedName;
+      touchAnnotation(ann);
+      applied++;
+    }
+
+    updateAnnotationList();
+    renderCenterLines();
+    renderDrawingLabels();
+    if (applied > 0) {
+      await saveAnnotations();
+      setStatus(`Auto-labeled ${applied} lane(s). Found suggestions for ${found} lane(s).`);
+    } else {
+      setStatus(`Found suggestions for ${found} lane(s), but no generic lane names needed updates.`);
+    }
+  } catch (err) {
+    setStatus(`Auto-label error: ${err.message}`);
+  }
+}
+
 async function loadAnnotations(options = {}) {
   try {
     const res = await fetch('/api/load', { headers: authHeaders() });
@@ -2245,6 +2289,7 @@ document.getElementById('btn-clear-erasers').addEventListener('click', clearAllE
 document.getElementById('btn-save').addEventListener('click', saveAnnotations);
 document.getElementById('btn-load').addEventListener('click', loadAnnotations);
 document.getElementById('btn-download-json').addEventListener('click', downloadAnnotationsJson);
+document.getElementById('btn-auto-label').addEventListener('click', autoLabelLanes);
 
 document.getElementById('btn-save-gps').addEventListener('click', () => {
   if (gpsWs && gpsWs.readyState === WebSocket.OPEN) {

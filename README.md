@@ -42,6 +42,8 @@ ROUTE_DOCUMENT_ID=default
 
 The app stores one shared route document in `public.route_documents`. Friends load the same document, save edits through `/api/save`, and receive live reloads through Supabase Realtime when another browser updates the document.
 
+Lane auto-labeling uses `MAPBOX_TOKEN` on the server to reverse-geocode sampled lane points. It only applies labels to generic lane names like `Road 1`, so intentional human labels are left alone.
+
 ## Vercel Deployment
 
 1. Push this repo to GitHub.

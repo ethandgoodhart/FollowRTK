@@ -16,6 +16,7 @@ function loadEnv() {
 loadEnv();
 
 const { getPublicConfig, isAuthorized, loadRouteDocument, saveRouteDocument } = require('./lib/storage');
+const { suggestLabelsForDocument } = require('./lib/autoLabel');
 
 const app = express();
 const PORT = 3000;
@@ -49,6 +50,18 @@ app.post('/api/save', async (req, res) => {
   try {
     const result = await saveRouteDocument(data, req.headers['x-followrtk-client-id']);
     res.json(result);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/autolabel', async (req, res) => {
+  if (!isAuthorized(req)) return res.status(401).json({ error: 'Invalid password' });
+  if (!process.env.MAPBOX_TOKEN) return res.status(500).json({ error: 'MAPBOX_TOKEN is not configured' });
+
+  try {
+    const suggestions = await suggestLabelsForDocument(req.body, process.env.MAPBOX_TOKEN);
+    res.json({ suggestions });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

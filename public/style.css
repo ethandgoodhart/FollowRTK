@@ -308,6 +308,12 @@ input[type="text"]:focus {
 }
 .action-btn.load:hover { background: #5a4a8b; }
 
+.action-btn.label {
+  background: #6b5a1f;
+  color: #ffe27a;
+}
+.action-btn.label:hover { background: #84702b; }
+
 #annotation-list, #center-line-list, #connector-list, #manual-centerline-list {
   max-height: 200px;
   overflow-y: auto;
