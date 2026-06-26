@@ -1,6 +1,6 @@
 create table if not exists public.route_documents (
   id text primary key,
-  payload jsonb not null default '{"annotations":[],"connectors":[],"manualCenterLines":[],"eraserPoints":[]}'::jsonb,
+  payload jsonb not null default '{"annotations":[],"connectors":[],"manualCenterLines":[],"suppressedAutoCenterLineIds":[],"eraserPoints":[]}'::jsonb,
   updated_by text,
   updated_at timestamptz not null default now()
 );
@@ -19,7 +19,7 @@ grant select on public.route_documents to anon;
 insert into public.route_documents (id, payload)
 values (
   'default',
-  '{"annotations":[],"connectors":[],"manualCenterLines":[],"eraserPoints":[],"metadata":{"campus":"Stanford University","project":"FollowRTK Self-Driving Golf Cart"}}'::jsonb
+  '{"annotations":[],"connectors":[],"manualCenterLines":[],"suppressedAutoCenterLineIds":[],"eraserPoints":[],"metadata":{"campus":"Stanford University","project":"FollowRTK Self-Driving Golf Cart"}}'::jsonb
 )
 on conflict (id) do nothing;
 

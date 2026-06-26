@@ -329,7 +329,7 @@ input[type="text"]:focus {
   background: rgba(255, 255, 255, 0.1);
 }
 
-.annotation-item.selected {
+.annotation-item.selected, .center-line-item.selected {
   background: rgba(255, 255, 255, 0.15);
   outline: 1px solid rgba(255, 255, 255, 0.3);
 }
@@ -414,6 +414,22 @@ input[type="text"]:focus {
 
 .annotation-delete-btn:hover {
   color: #ff4444;
+}
+
+.center-line-edit-btn {
+  margin-right: 4px;
+  padding: 2px 6px;
+  border: 1px solid rgba(255, 204, 0, 0.5);
+  border-radius: 4px;
+  background: rgba(255, 204, 0, 0.14);
+  color: #ffdf5d;
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.center-line-edit-btn:hover {
+  background: rgba(255, 204, 0, 0.24);
 }
 
 #status-bar {

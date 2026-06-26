@@ -26,10 +26,12 @@ let map;
 let annotations = [];
 let connectors = [];
 let manualCenterLines = [];
+let suppressedAutoCenterLineIds = [];
 let eraserPoints = [];
 let activeAnnotationId = null;
 let activeConnectorId = null;
 let activeManualCenterLineId = null;
+let selectedAutoCenterLineId = null;
 let currentMode = 'lane';
 let pointMarkers = [];
 let connectorMarkers = [];
@@ -39,6 +41,7 @@ let drawingLabelMarkers = [];
 let lineCounter = 0;
 let connectorCounter = 0;
 let manualCenterLineCounter = 0;
+let autoCenterLineRecords = new Map();
 let eraserRadius = 8;
 
 // GPS state
@@ -214,6 +217,7 @@ function createRouteDocument() {
       updatedAt: line.updatedAt || '',
       activeBy: line.activeBy || ''
     })),
+    suppressedAutoCenterLineIds: [...new Set(suppressedAutoCenterLineIds)],
     eraserPoints: eraserPoints.map(ep => ({
       id: ep.id,
       lat: ep.lat,
@@ -551,6 +555,17 @@ function findPairs() {
   );
 }
 
+function getAutoCenterLineId(pair) {
+  return [pair.a.id, pair.b.id].sort().join('__');
+}
+
+function suppressAutoCenterLine(id) {
+  if (!suppressedAutoCenterLineIds.includes(id)) {
+    suppressedAutoCenterLineIds.push(id);
+  }
+  if (selectedAutoCenterLineId === id) selectedAutoCenterLineId = null;
+}
+
 // --- Snap to nearest lane point ---
 
 function snapToLanePoint(clickLngLat) {
@@ -598,7 +613,7 @@ function clearManualCenterLineLayers() {
   manualCenterLineSources.clear();
 }
 
-function addCenterLineLayer(sourceId, features) {
+function addCenterLineLayer(sourceId, features, selected = false) {
   centerLineSources.add(sourceId);
   map.addSource(`source-center-${sourceId}`, {
     type: 'geojson',
@@ -609,10 +624,10 @@ function addCenterLineLayer(sourceId, features) {
     type: 'line',
     source: `source-center-${sourceId}`,
     paint: {
-      'line-color': COLORS.center,
-      'line-width': 3,
+      'line-color': selected ? '#fff2a8' : COLORS.center,
+      'line-width': selected ? 6 : 3,
       'line-dasharray': [4, 3],
-      'line-opacity': 0.85
+      'line-opacity': selected ? 1 : 0.85
     },
     layout: { 'line-cap': 'round', 'line-join': 'round' }
   });
@@ -665,6 +680,7 @@ function removeManualCenterLineFromMap(id) {
 
 function renderCenterLines() {
   clearCenterLines();
+  autoCenterLineRecords.clear();
   const pairs = findPairs();
   const listEl = document.getElementById('center-line-list');
   listEl.innerHTML = '';
@@ -675,38 +691,64 @@ function renderCenterLines() {
   }
 
   const laneCenterLines = [];
+  let visibleCount = 0;
 
-  pairs.forEach((pair, idx) => {
+  pairs.forEach(pair => {
+    const id = getAutoCenterLineId(pair);
+    if (suppressedAutoCenterLineIds.includes(id)) return;
+
     const center = computeCenterLine(pair.a.points, pair.b.points);
     laneCenterLines.push(center);
     const segments = applyCenterLineErasure(center, eraserPoints, eraserRadius);
 
     const features = segments.map(seg => ({
       type: 'Feature',
-      properties: {},
+      properties: { kind: 'auto-centerline', id },
       geometry: {
         type: 'LineString',
         coordinates: seg.map(p => [p.lng, p.lat])
       }
     }));
 
-    addCenterLineLayer(`pair-${idx}`, features);
-
     const erasedCount = eraserPoints.filter(ep =>
       center.some(cp => haversineMeters(cp, ep) < (ep.radius || eraserRadius) + 5)
     ).length;
+    const record = { id, name: pair.name, pair, center, erasedCount };
+    autoCenterLineRecords.set(id, record);
+    addCenterLineLayer(id, features, selectedAutoCenterLineId === id);
 
     const item = document.createElement('div');
-    item.className = 'center-line-item';
+    item.className = `center-line-item${selectedAutoCenterLineId === id ? ' selected' : ''}`;
+    item.dataset.autoCenterlineId = id;
     item.innerHTML = `
       <div class="annotation-dot center"></div>
       <div class="annotation-info">
         <div class="annotation-name">${pair.name}</div>
-        <div class="annotation-meta">lane${erasedCount > 0 ? ` | ${erasedCount} eraser(s)` : ''}</div>
+        <div class="annotation-meta">auto | ${center.length} pts${erasedCount > 0 ? ` | ${erasedCount} eraser(s)` : ''}</div>
       </div>
+      <button class="center-line-edit-btn" title="Convert to editable manual centerline">Edit</button>
+      <button class="annotation-delete-btn" title="Suppress auto centerline">&times;</button>
     `;
+    item.querySelector('.annotation-info').addEventListener('click', () => selectAutoCenterLine(id));
+    item.querySelector('.center-line-edit-btn').addEventListener('click', (e) => {
+      e.stopPropagation();
+      convertAutoCenterLineToManual(id);
+    });
+    item.querySelector('.annotation-delete-btn').addEventListener('click', (e) => {
+      e.stopPropagation();
+      deleteAutoCenterLine(id);
+    });
     listEl.appendChild(item);
+    visibleCount++;
   });
+
+  if (selectedAutoCenterLineId && !autoCenterLineRecords.has(selectedAutoCenterLineId)) {
+    selectedAutoCenterLineId = null;
+  }
+
+  if (visibleCount === 0) {
+    listEl.innerHTML = '<p class="hint">All generated center lines are hidden. Draw manual center lines where needed.</p>';
+  }
 }
 
 // --- Live GPS ---
@@ -880,6 +922,7 @@ function selectRenderedRouteAtClick(e) {
   const lineLayers = [
     ...annotations.map(ann => `layer-${ann.id}`),
     ...connectors.map(conn => `layer-connector-${conn.id}`),
+    ...[...centerLineSources].map(id => `layer-center-${id}`),
     ...manualCenterLines.map(line => `layer-manual-center-${line.id}`)
   ].filter(id => map.getLayer(id));
   if (lineLayers.length === 0) return false;
@@ -904,6 +947,10 @@ function selectRenderedRouteAtClick(e) {
   }
   if (feature.properties.kind === 'manual-centerline') {
     selectManualCenterLine(feature.properties.id);
+    return true;
+  }
+  if (feature.properties.kind === 'auto-centerline') {
+    selectAutoCenterLine(feature.properties.id);
     return true;
   }
   return false;
@@ -1377,6 +1424,7 @@ function scrollSelectedListItem(kind, id) {
     let selector = `[data-annotation-id="${id}"]`;
     if (kind === 'connector') selector = `[data-connector-id="${id}"]`;
     if (kind === 'manual-centerline') selector = `[data-manual-centerline-id="${id}"]`;
+    if (kind === 'auto-centerline') selector = `[data-auto-centerline-id="${id}"]`;
     const item = document.querySelector(selector);
     if (item) item.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
   });
@@ -1436,6 +1484,7 @@ function newLine() {
   lineCounter++;
   const roadName = nameInput.value.trim() || `Road ${lineCounter}`;
   const clearedActive = !!(clearActiveAnnotation() || clearActiveConnector() || clearActiveManualCenterLine());
+  selectedAutoCenterLineId = null;
 
   const annotation = {
     id: `ann-${Date.now()}-${lineCounter}`,
@@ -1453,6 +1502,7 @@ function newLine() {
   updateAnnotationList();
   updateConnectorList();
   updateManualCenterLineList();
+  renderCenterLines();
   renderDrawingLabels();
   if (clearedActive) scheduleAutoSave();
   setStatus(`Started "${roadName}". Click on the map to add points.`);
@@ -1512,6 +1562,7 @@ function newConnector() {
   connectorCounter++;
   const name = nameInput.value.trim() || `Connector ${connectorCounter}`;
   const clearedActive = !!(clearActiveAnnotation() || clearActiveConnector() || clearActiveManualCenterLine());
+  selectedAutoCenterLineId = null;
 
   const conn = {
     id: `conn-${Date.now()}-${connectorCounter}`,
@@ -1529,6 +1580,7 @@ function newConnector() {
   updateAnnotationList();
   updateConnectorList();
   updateManualCenterLineList();
+  renderCenterLines();
   renderDrawingLabels();
   if (clearedActive) scheduleAutoSave();
   setStatus(`Started connector "${name}". Click near lane points to snap.`);
@@ -1588,6 +1640,7 @@ function selectConnector(id) {
   if (activeAnnotationId) clearActiveAnnotation();
   if (activeManualCenterLineId) clearActiveManualCenterLine();
   if (activeConnectorId && activeConnectorId !== id) clearActiveConnector();
+  selectedAutoCenterLineId = null;
   activeConnectorId = id;
   activeAnnotationId = null;
   activeManualCenterLineId = null;
@@ -1603,6 +1656,7 @@ function selectConnector(id) {
     setStatus(`Selected connector "${conn.name}" for editing.`);
   }
   renderDrawingLabels();
+  renderCenterLines();
   scheduleAutoSave();
   updateConnectorList();
   updateAnnotationList();
@@ -1641,6 +1695,81 @@ function updateConnectorList() {
   });
 }
 
+// --- Auto centerline selection / conversion ---
+
+function selectAutoCenterLine(id) {
+  const record = autoCenterLineRecords.get(id);
+  if (!record) return;
+
+  const clearedActive = !!(clearActiveAnnotation() || clearActiveConnector() || clearActiveManualCenterLine());
+  activeAnnotationId = null;
+  activeConnectorId = null;
+  activeManualCenterLineId = null;
+  selectedAutoCenterLineId = id;
+
+  updateAnnotationList();
+  updateConnectorList();
+  updateManualCenterLineList();
+  renderCenterLines();
+  renderDrawingLabels();
+  if (clearedActive) scheduleAutoSave();
+  setStatus(`Selected auto centerline "${record.name}". Use Edit to convert it to a manual line, or delete it to hide it.`);
+  scrollSelectedListItem('auto-centerline', id);
+}
+
+function deleteAutoCenterLine(id) {
+  const record = autoCenterLineRecords.get(id);
+  suppressAutoCenterLine(id);
+  renderCenterLines();
+  scheduleAutoSave();
+  setStatus(`Deleted auto centerline "${record ? record.name : 'centerline'}". It will stay hidden in the shared data.`);
+}
+
+function convertAutoCenterLineToManual(id) {
+  const record = autoCenterLineRecords.get(id);
+  if (!record || record.center.length < 2) {
+    setStatus('Could not convert this auto centerline.');
+    return;
+  }
+
+  clearActiveAnnotation();
+  clearActiveConnector();
+  clearActiveManualCenterLine();
+  suppressAutoCenterLine(id);
+  selectedAutoCenterLineId = null;
+
+  manualCenterLineCounter++;
+  const line = {
+    id: `center-${Date.now()}-${manualCenterLineCounter}`,
+    name: `${record.name} center`,
+    type: 'manual-centerline',
+    points: record.center.map(p => ({ lat: p.lat, lng: p.lng })),
+    createdBy: collaboratorName,
+    updatedBy: collaboratorName,
+    updatedAt: new Date().toISOString(),
+    activeBy: collaboratorName
+  };
+
+  manualCenterLines.push(line);
+  activeManualCenterLineId = line.id;
+  currentMode = 'centerline';
+  document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
+  document.querySelector('[data-mode="centerline"]').classList.add('active');
+  toggleModeUI();
+  document.getElementById('centerline-name').value = line.name;
+
+  line.points.forEach((pt, i) => addManualCenterLineMarker(pt, i, line.id));
+  updateManualCenterLine(line);
+  renderCenterLines();
+  renderDrawingLabels();
+  updateAnnotationList();
+  updateConnectorList();
+  updateManualCenterLineList();
+  scheduleAutoSave();
+  setStatus(`Converted "${record.name}" to an editable manual centerline.`);
+  scrollSelectedListItem('manual-centerline', line.id);
+}
+
 // --- Manual centerline CRUD ---
 
 function newManualCenterLine() {
@@ -1649,6 +1778,7 @@ function newManualCenterLine() {
   const name = nameInput.value.trim() || `Manual Center ${manualCenterLineCounter}`;
 
   const clearedActive = !!(clearActiveAnnotation() || clearActiveConnector() || clearActiveManualCenterLine());
+  selectedAutoCenterLineId = null;
   const line = {
     id: `center-${Date.now()}-${manualCenterLineCounter}`,
     name,
@@ -1669,6 +1799,7 @@ function newManualCenterLine() {
   updateAnnotationList();
   updateConnectorList();
   updateManualCenterLineList();
+  renderCenterLines();
   renderDrawingLabels();
   if (clearedActive) scheduleAutoSave();
   setStatus(`Started manual centerline "${name}". Click on the map to add yellow center points.`);
@@ -1726,6 +1857,7 @@ function selectManualCenterLine(id) {
   if (activeAnnotationId && activeAnnotationId !== id) clearActiveAnnotation();
   if (activeConnectorId && activeConnectorId !== id) clearActiveConnector();
   if (activeManualCenterLineId && activeManualCenterLineId !== id) clearActiveManualCenterLine();
+  selectedAutoCenterLineId = null;
 
   activeAnnotationId = null;
   activeConnectorId = null;
@@ -1743,6 +1875,7 @@ function selectManualCenterLine(id) {
     setStatus(`Selected manual centerline "${line.name}" for editing.`);
   }
   renderDrawingLabels();
+  renderCenterLines();
   scheduleAutoSave();
   updateAnnotationList();
   updateConnectorList();
@@ -1805,6 +1938,7 @@ function selectAnnotation(id) {
   if (activeConnectorId) clearActiveConnector();
   if (activeManualCenterLineId) clearActiveManualCenterLine();
   if (activeAnnotationId && activeAnnotationId !== id) clearActiveAnnotation();
+  selectedAutoCenterLineId = null;
   activeAnnotationId = id;
   activeConnectorId = null;
   activeManualCenterLineId = null;
@@ -1820,6 +1954,7 @@ function selectAnnotation(id) {
     setStatus(`Selected "${ann.name}" for editing. Click to add more points.`);
   }
   renderDrawingLabels();
+  renderCenterLines();
   scheduleAutoSave();
   updateAnnotationList();
   updateConnectorList();
@@ -1922,10 +2057,12 @@ async function loadAnnotations(options = {}) {
     annotations = data.annotations || [];
     connectors = data.connectors || [];
     manualCenterLines = data.manualCenterLines || [];
+    suppressedAutoCenterLineIds = data.suppressedAutoCenterLineIds || [];
     eraserPoints = data.eraserPoints || [];
     activeAnnotationId = null;
     activeConnectorId = null;
     activeManualCenterLineId = null;
+    selectedAutoCenterLineId = null;
 
     rebuildAllVisuals();
     updateAnnotationList();
@@ -1998,6 +2135,8 @@ document.getElementById('join-form').addEventListener('submit', async (e) => {
 document.querySelectorAll('.mode-btn').forEach(btn => {
   btn.addEventListener('click', () => {
     let clearedActive = false;
+    const hadSelectedAutoCenterLine = !!selectedAutoCenterLineId;
+    selectedAutoCenterLineId = null;
     document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
     currentMode = btn.dataset.mode;
@@ -2028,6 +2167,7 @@ document.querySelectorAll('.mode-btn').forEach(btn => {
       renderDrawingLabels();
       scheduleAutoSave();
     }
+    if (hadSelectedAutoCenterLine) renderCenterLines();
   });
 });
 
