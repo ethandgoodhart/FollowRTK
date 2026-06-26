@@ -183,6 +183,39 @@ function findPairs() {
   return pairs;
 }
 
+function findConnectorPairs() {
+  const byName = {};
+  for (const conn of connectors) {
+    if (!byName[conn.name]) byName[conn.name] = [];
+    byName[conn.name].push(conn);
+  }
+  const pairs = [];
+  for (const name of Object.keys(byName)) {
+    const conns = byName[name];
+    for (let i = 0; i + 1 < conns.length; i += 2) {
+      if (conns[i].points.length >= 2 && conns[i + 1].points.length >= 2) {
+        pairs.push({ name, a: conns[i], b: conns[i + 1] });
+      }
+    }
+  }
+  return pairs;
+}
+
+function nearestPointOnCenterLines(point, centerLines) {
+  let best = null;
+  let bestDist = Infinity;
+  for (const line of centerLines) {
+    for (const pt of line) {
+      const d = haversineMeters(point, pt);
+      if (d < bestDist) {
+        bestDist = d;
+        best = { lat: pt.lat, lng: pt.lng };
+      }
+    }
+  }
+  return bestDist < 100 ? best : null;
+}
+
 // --- Snap to nearest lane point ---
 
 function snapToLanePoint(clickLngLat) {
@@ -221,19 +254,43 @@ function clearCenterLines() {
   centerLineSources.clear();
 }
 
+function addCenterLineLayer(sourceId, features) {
+  centerLineSources.add(sourceId);
+  map.addSource(`source-center-${sourceId}`, {
+    type: 'geojson',
+    data: { type: 'FeatureCollection', features }
+  });
+  map.addLayer({
+    id: `layer-center-${sourceId}`,
+    type: 'line',
+    source: `source-center-${sourceId}`,
+    paint: {
+      'line-color': COLORS.center,
+      'line-width': 3,
+      'line-dasharray': [4, 3],
+      'line-opacity': 0.85
+    },
+    layout: { 'line-cap': 'round', 'line-join': 'round' }
+  });
+}
+
 function renderCenterLines() {
   clearCenterLines();
   const pairs = findPairs();
+  const connPairs = findConnectorPairs();
   const listEl = document.getElementById('center-line-list');
   listEl.innerHTML = '';
 
-  if (pairs.length === 0) {
+  if (pairs.length === 0 && connPairs.length === 0) {
     listEl.innerHTML = '<p class="hint">Draw 2 lane boundaries with the same road name to auto-generate a center line.</p>';
     return;
   }
 
+  const laneCenterLines = [];
+
   pairs.forEach((pair, idx) => {
     const center = computeCenterLine(pair.a.points, pair.b.points);
+    laneCenterLines.push(center);
     const segments = applyCenterLineErasure(center, eraserPoints, eraserRadius);
 
     const features = segments.map(seg => ({
@@ -245,26 +302,7 @@ function renderCenterLines() {
       }
     }));
 
-    const sourceId = `pair-${idx}`;
-    centerLineSources.add(sourceId);
-
-    map.addSource(`source-center-${sourceId}`, {
-      type: 'geojson',
-      data: { type: 'FeatureCollection', features }
-    });
-
-    map.addLayer({
-      id: `layer-center-${sourceId}`,
-      type: 'line',
-      source: `source-center-${sourceId}`,
-      paint: {
-        'line-color': COLORS.center,
-        'line-width': 3,
-        'line-dasharray': [4, 3],
-        'line-opacity': 0.85
-      },
-      layout: { 'line-cap': 'round', 'line-join': 'round' }
-    });
+    addCenterLineLayer(`pair-${idx}`, features);
 
     const erasedCount = eraserPoints.filter(ep =>
       center.some(cp => haversineMeters(cp, ep) < (ep.radius || eraserRadius) + 5)
@@ -276,7 +314,40 @@ function renderCenterLines() {
       <div class="annotation-dot center"></div>
       <div class="annotation-info">
         <div class="annotation-name">${pair.name}</div>
-        <div class="annotation-meta">auto${erasedCount > 0 ? ` | ${erasedCount} eraser(s)` : ''}</div>
+        <div class="annotation-meta">lane${erasedCount > 0 ? ` | ${erasedCount} eraser(s)` : ''}</div>
+      </div>
+    `;
+    listEl.appendChild(item);
+  });
+
+  connPairs.forEach((pair, idx) => {
+    const center = computeCenterLine(pair.a.points, pair.b.points);
+
+    if (laneCenterLines.length > 0) {
+      const snapFirst = nearestPointOnCenterLines(center[0], laneCenterLines);
+      const snapLast = nearestPointOnCenterLines(center[center.length - 1], laneCenterLines);
+      if (snapFirst) center[0] = snapFirst;
+      if (snapLast) center[center.length - 1] = snapLast;
+    }
+
+    const features = [{
+      type: 'Feature',
+      properties: {},
+      geometry: {
+        type: 'LineString',
+        coordinates: center.map(p => [p.lng, p.lat])
+      }
+    }];
+
+    addCenterLineLayer(`conn-pair-${idx}`, features);
+
+    const item = document.createElement('div');
+    item.className = 'center-line-item';
+    item.innerHTML = `
+      <div class="annotation-dot center"></div>
+      <div class="annotation-info">
+        <div class="annotation-name">${pair.name}</div>
+        <div class="annotation-meta">connector</div>
       </div>
     `;
     listEl.appendChild(item);
@@ -502,6 +573,7 @@ function onMapClick(e) {
     addConnectorMarker(addedPoint, conn.points.length - 1, conn.id, !!snapped);
     updateConnectorLine(conn);
     updateConnectorList();
+    renderCenterLines();
     scheduleAutoSave();
     setStatus(snapped
       ? `Snapped to lane point (${conn.points.length} pts)`
@@ -660,6 +732,7 @@ function addConnectorMarker(point, index, connectorId, snapped) {
       el.style.height = snappedPt ? '14px' : '10px';
       el.style.transform = snappedPt ? 'rotate(45deg)' : '';
       updateConnectorLine(conn);
+      renderCenterLines();
       scheduleAutoSave();
     }
   });
@@ -905,6 +978,8 @@ function finishConnector() {
   const conn = connectors.find(c => c.id === activeConnectorId);
   activeConnectorId = null;
   updateConnectorList();
+  renderCenterLines();
+  scheduleAutoSave();
   setStatus(`Finished connector "${conn ? conn.name : ''}".`);
 }
 
@@ -923,6 +998,7 @@ function undoConnectorPoint() {
   conn.points.forEach((pt, i) => addConnectorMarker(pt, i, conn.id, true));
   updateConnectorLine(conn);
   updateConnectorList();
+  renderCenterLines();
   scheduleAutoSave();
   setStatus(`Removed last connector point. ${conn.points.length} remaining.`);
 }
@@ -936,6 +1012,7 @@ function deleteConnector(id) {
   connectors.splice(idx, 1);
   if (activeConnectorId === id) activeConnectorId = null;
   updateConnectorList();
+  renderCenterLines();
   scheduleAutoSave();
   setStatus(`Deleted connector "${name}".`);
 }
