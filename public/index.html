@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FollowRTK Lane Annotator</title>
+  <script src="https://api.mapbox.com/mapbox-gl-js/v3.4.0/mapbox-gl.js"></script>
+  <link href="https://api.mapbox.com/mapbox-gl-js/v3.4.0/mapbox-gl.css" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="map"></div>
+
+  <div id="panel">
+    <h2>Lane Annotator</h2>
+    <p class="subtitle">Self-Driving Golf Cart - Stanford Campus</p>
+
+    <div class="section">
+      <label>Mode</label>
+      <div class="mode-buttons">
+        <button id="btn-lane" class="mode-btn active" data-mode="lane">Lane</button>
+        <button id="btn-eraser" class="mode-btn" data-mode="eraser">Eraser</button>
+      </div>
+    </div>
+
+    <div class="section" id="lane-controls">
+      <label for="line-name">Road Name</label>
+      <input type="text" id="line-name" placeholder="e.g. Palm Drive">
+      <p class="hint">Draw 2 lane boundaries with the same name to auto-generate a center line.</p>
+      <div class="btn-row" style="margin-top: 6px;">
+        <button id="btn-new" class="action-btn new">New Line</button>
+        <button id="btn-finish" class="action-btn finish">Finish Line</button>
+      </div>
+      <div class="btn-row">
+        <button id="btn-undo" class="action-btn undo">Undo Point</button>
+        <button id="btn-delete" class="action-btn delete">Delete Line</button>
+      </div>
+    </div>
+
+    <div class="section hidden" id="eraser-controls">
+      <label>Eraser Radius</label>
+      <div class="slider-row">
+        <input type="range" id="eraser-radius" min="2" max="30" value="8">
+        <span id="eraser-radius-val">8m</span>
+      </div>
+      <p class="hint">Click near a center line to erase a section. Click an eraser marker to remove it.</p>
+      <div class="btn-row" style="margin-top: 6px;">
+        <button id="btn-undo-eraser" class="action-btn undo">Undo Eraser</button>
+        <button id="btn-clear-erasers" class="action-btn delete">Clear All</button>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="btn-row">
+        <button id="btn-save" class="action-btn save">Save to JSON</button>
+        <button id="btn-load" class="action-btn load">Load JSON</button>
+      </div>
+    </div>
+
+    <div class="section">
+      <label>Center Lines (auto)</label>
+      <div id="center-line-list"></div>
+    </div>
+
+    <div class="section">
+      <label>Lane Boundaries (<span id="annotation-count">0</span>)</label>
+      <div id="annotation-list"></div>
+    </div>
+
+    <div id="status-bar">Click on the map to add points</div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
