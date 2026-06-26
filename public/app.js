@@ -32,6 +32,9 @@ let eraserMarkers = [];
 let lineCounter = 0;
 let connectorCounter = 0;
 let eraserRadius = 8;
+let showConnectorCenterLines = false;
+let centerLineMarkers = [];
+let storedCenterLines = [];
 
 // GPS state
 let gpsMarker = null;
@@ -254,8 +257,20 @@ function clearCenterLines() {
   centerLineSources.clear();
 }
 
-function addCenterLineLayer(sourceId, features) {
+function clearCenterLineMarkers() {
+  centerLineMarkers.forEach(m => m.remove());
+  centerLineMarkers = [];
+}
+
+function addCenterLineLayer(sourceId, points) {
   centerLineSources.add(sourceId);
+  const coords = points.map(p => [p.lng, p.lat]);
+  const features = coords.length >= 2 ? [{
+    type: 'Feature',
+    properties: {},
+    geometry: { type: 'LineString', coordinates: coords }
+  }] : [];
+
   map.addSource(`source-center-${sourceId}`, {
     type: 'geojson',
     data: { type: 'FeatureCollection', features }
@@ -274,10 +289,82 @@ function addCenterLineLayer(sourceId, features) {
   });
 }
 
+function updateCenterLineSource(sourceId, points) {
+  const src = map.getSource(`source-center-${sourceId}`);
+  if (!src) return;
+  const coords = points.map(p => [p.lng, p.lat]);
+  src.setData({
+    type: 'FeatureCollection',
+    features: coords.length >= 2 ? [{
+      type: 'Feature',
+      properties: {},
+      geometry: { type: 'LineString', coordinates: coords }
+    }] : []
+  });
+}
+
+function addCenterLinePointMarker(point, clIndex, pointIndex) {
+  const el = document.createElement('div');
+  el.style.width = '10px';
+  el.style.height = '10px';
+  el.style.borderRadius = '50%';
+  el.style.background = COLORS.center;
+  el.style.border = '2px solid white';
+  el.style.cursor = 'pointer';
+  el.style.boxShadow = '0 1px 4px rgba(0,0,0,0.5)';
+
+  const marker = new mapboxgl.Marker({ element: el, draggable: true })
+    .setLngLat([point.lng, point.lat])
+    .addTo(map);
+
+  marker._clIndex = clIndex;
+  marker._pointIndex = pointIndex;
+
+  marker.on('dragend', () => {
+    const lngLat = marker.getLngLat();
+    const cl = storedCenterLines[clIndex];
+    if (cl && cl.points[marker._pointIndex]) {
+      cl.points[marker._pointIndex] = { lat: lngLat.lat, lng: lngLat.lng };
+      updateCenterLineSource(cl.sourceId, cl.points);
+      scheduleAutoSave();
+    }
+  });
+
+  el.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const cl = storedCenterLines[clIndex];
+    if (!cl || cl.points.length <= 2) return;
+    cl.points.splice(pointIndex, 1);
+    rebuildCenterLineMarkersForLine(clIndex);
+    updateCenterLineSource(cl.sourceId, cl.points);
+    scheduleAutoSave();
+    setStatus(`Deleted center line point. ${cl.points.length} remaining.`);
+  });
+
+  centerLineMarkers.push(marker);
+}
+
+function rebuildCenterLineMarkersForLine(clIndex) {
+  centerLineMarkers = centerLineMarkers.filter(m => {
+    if (m._clIndex === clIndex) {
+      m.remove();
+      return false;
+    }
+    return true;
+  });
+  const cl = storedCenterLines[clIndex];
+  if (cl) {
+    cl.points.forEach((pt, i) => addCenterLinePointMarker(pt, clIndex, i));
+  }
+}
+
 function renderCenterLines() {
   clearCenterLines();
+  clearCenterLineMarkers();
+  storedCenterLines = [];
+
   const pairs = findPairs();
-  const connPairs = findConnectorPairs();
+  const connPairs = showConnectorCenterLines ? findConnectorPairs() : [];
   const listEl = document.getElementById('center-line-list');
   listEl.innerHTML = '';
 
@@ -292,17 +379,14 @@ function renderCenterLines() {
     const center = computeCenterLine(pair.a.points, pair.b.points);
     laneCenterLines.push(center);
     const segments = applyCenterLineErasure(center, eraserPoints, eraserRadius);
+    const allPoints = segments.flat();
 
-    const features = segments.map(seg => ({
-      type: 'Feature',
-      properties: {},
-      geometry: {
-        type: 'LineString',
-        coordinates: seg.map(p => [p.lng, p.lat])
-      }
-    }));
+    const sourceId = `pair-${idx}`;
+    const clIndex = storedCenterLines.length;
+    storedCenterLines.push({ sourceId, name: pair.name, points: allPoints, type: 'lane' });
 
-    addCenterLineLayer(`pair-${idx}`, features);
+    addCenterLineLayer(sourceId, allPoints);
+    allPoints.forEach((pt, i) => addCenterLinePointMarker(pt, clIndex, i));
 
     const erasedCount = eraserPoints.filter(ep =>
       center.some(cp => haversineMeters(cp, ep) < (ep.radius || eraserRadius) + 5)
@@ -314,7 +398,7 @@ function renderCenterLines() {
       <div class="annotation-dot center"></div>
       <div class="annotation-info">
         <div class="annotation-name">${pair.name}</div>
-        <div class="annotation-meta">lane${erasedCount > 0 ? ` | ${erasedCount} eraser(s)` : ''}</div>
+        <div class="annotation-meta">lane · ${allPoints.length} pts${erasedCount > 0 ? ` · ${erasedCount} eraser(s)` : ''}</div>
       </div>
     `;
     listEl.appendChild(item);
@@ -330,16 +414,12 @@ function renderCenterLines() {
       if (snapLast) center[center.length - 1] = snapLast;
     }
 
-    const features = [{
-      type: 'Feature',
-      properties: {},
-      geometry: {
-        type: 'LineString',
-        coordinates: center.map(p => [p.lng, p.lat])
-      }
-    }];
+    const sourceId = `conn-pair-${idx}`;
+    const clIndex = storedCenterLines.length;
+    storedCenterLines.push({ sourceId, name: pair.name, points: center, type: 'connector' });
 
-    addCenterLineLayer(`conn-pair-${idx}`, features);
+    addCenterLineLayer(sourceId, center);
+    center.forEach((pt, i) => addCenterLinePointMarker(pt, clIndex, i));
 
     const item = document.createElement('div');
     item.className = 'center-line-item';
@@ -347,7 +427,7 @@ function renderCenterLines() {
       <div class="annotation-dot center"></div>
       <div class="annotation-info">
         <div class="annotation-name">${pair.name}</div>
-        <div class="annotation-meta">connector</div>
+        <div class="annotation-meta">connector · ${center.length} pts</div>
       </div>
     `;
     listEl.appendChild(item);
@@ -1185,6 +1265,7 @@ async function loadAnnotations() {
       removeConnectorFromMap(conn.id);
     });
     clearCenterLines();
+    clearCenterLineMarkers();
     eraserMarkers.forEach(m => m.remove());
     eraserMarkers = [];
 
@@ -1246,6 +1327,11 @@ document.querySelectorAll('.mode-btn').forEach(btn => {
       setStatus('Lane mode: click "New Line" to start drawing a lane boundary.');
     }
   });
+});
+
+document.getElementById('chk-connector-centers').addEventListener('change', (e) => {
+  showConnectorCenterLines = e.target.checked;
+  renderCenterLines();
 });
 
 document.getElementById('eraser-radius').addEventListener('input', (e) => {
