@@ -15,32 +15,43 @@ function loadEnv() {
 
 loadEnv();
 
+const { getPublicConfig, isAuthorized, loadRouteDocument, saveRouteDocument } = require('./lib/storage');
+
 const app = express();
 const PORT = 3000;
-const DATA_FILE = path.join(__dirname, 'annotations.json');
 
 app.use(express.json({ limit: '10mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
 app.get('/api/config', (req, res) => {
-  res.json({ mapboxToken: process.env.MAPBOX_TOKEN || '' });
+  res.json(getPublicConfig());
 });
 
-app.get('/api/load', (req, res) => {
-  if (!fs.existsSync(DATA_FILE)) {
-    return res.json({ annotations: [] });
+app.get('/api/load', async (req, res) => {
+  if (!isAuthorized(req)) return res.status(401).json({ error: 'Invalid password' });
+
+  try {
+    const data = await loadRouteDocument();
+    res.json(data);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
   }
-  const data = fs.readFileSync(DATA_FILE, 'utf-8');
-  res.json(JSON.parse(data));
 });
 
-app.post('/api/save', (req, res) => {
+app.post('/api/save', async (req, res) => {
+  if (!isAuthorized(req)) return res.status(401).json({ error: 'Invalid password' });
+
   const data = req.body;
   if (!data || !Array.isArray(data.annotations)) {
     return res.status(400).json({ error: 'Invalid data format. Expected { annotations: [...], eraserPoints?: [...] }' });
   }
-  fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
-  res.json({ success: true, count: data.annotations.length });
+
+  try {
+    const result = await saveRouteDocument(data, req.headers['x-followrtk-client-id']);
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
 });
 
 app.listen(PORT, () => {

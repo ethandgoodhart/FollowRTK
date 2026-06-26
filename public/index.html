@@ -6,14 +6,35 @@
   <title>FollowRTK Lane Annotator</title>
   <script src="https://api.mapbox.com/mapbox-gl-js/v3.4.0/mapbox-gl.js"></script>
   <link href="https://api.mapbox.com/mapbox-gl-js/v3.4.0/mapbox-gl.css" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
+  <div id="join-overlay" class="join-overlay hidden">
+    <form id="join-form" class="join-panel">
+      <h1>FollowRTK</h1>
+      <label for="collaborator-name">Name</label>
+      <input type="text" id="collaborator-name" placeholder="Your name" autocomplete="name" required>
+      <label for="site-password">Password</label>
+      <input type="password" id="site-password" placeholder="Project password" autocomplete="current-password" required>
+      <button type="submit">Join Map</button>
+      <p id="join-error" class="join-error"></p>
+    </form>
+  </div>
+
   <div id="map"></div>
 
   <div id="panel">
     <h2>Lane Annotator</h2>
     <p class="subtitle">Self-Driving Golf Cart - Stanford Campus</p>
+    <div id="sync-status" class="sync-status offline">Local mode</div>
+
+    <div class="section">
+      <label>Collaborators</label>
+      <div id="collaborator-list" class="collaborator-list">
+        <p class="hint">Join to see collaborators.</p>
+      </div>
+    </div>
 
     <div class="section" id="gps-panel">
       <label>Live GPS</label>
@@ -47,6 +68,7 @@
       <div class="mode-buttons">
         <button id="btn-lane" class="mode-btn active" data-mode="lane">Lane</button>
         <button id="btn-connector" class="mode-btn" data-mode="connector">Connector</button>
+        <button id="btn-centerline" class="mode-btn" data-mode="centerline">Center</button>
         <button id="btn-eraser" class="mode-btn" data-mode="eraser">Eraser</button>
       </div>
     </div>
@@ -92,16 +114,38 @@
       </div>
     </div>
 
+    <div class="section hidden" id="centerline-controls">
+      <label for="centerline-name">Centerline Name</label>
+      <input type="text" id="centerline-name" placeholder="e.g. Manual center">
+      <p class="hint">Click points directly along the desired yellow dotted route.</p>
+      <div class="btn-row" style="margin-top: 6px;">
+        <button id="btn-new-centerline" class="action-btn new">New Center</button>
+        <button id="btn-finish-centerline" class="action-btn finish">Finish</button>
+      </div>
+      <div class="btn-row">
+        <button id="btn-undo-centerline" class="action-btn undo">Undo Point</button>
+        <button id="btn-delete-centerline" class="action-btn delete">Delete</button>
+      </div>
+    </div>
+
     <div class="section">
       <div class="btn-row">
-        <button id="btn-save" class="action-btn save">Save to JSON</button>
-        <button id="btn-load" class="action-btn load">Load JSON</button>
+        <button id="btn-save" class="action-btn save">Save Routes</button>
+        <button id="btn-load" class="action-btn load">Reload Routes</button>
+      </div>
+      <div class="btn-row" style="margin-top: 6px;">
+        <button id="btn-download-json" class="action-btn load">Download JSON</button>
       </div>
     </div>
 
     <div class="section">
       <label>Center Lines (auto)</label>
       <div id="center-line-list"></div>
+    </div>
+
+    <div class="section">
+      <label>Manual Center Lines (<span id="manual-centerline-count">0</span>)</label>
+      <div id="manual-centerline-list"></div>
     </div>
 
     <div class="section">

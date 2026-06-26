@@ -1,3 +1,4 @@
 node_modules/
 annotations.json
 .env
+.vercel
