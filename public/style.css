@@ -96,6 +96,12 @@ body {
   color: #66ffaa;
 }
 
+.mode-btn.active[data-mode="connector"] {
+  border-color: #4488ff;
+  background: rgba(68, 136, 255, 0.15);
+  color: #66aaff;
+}
+
 .mode-btn.active[data-mode="eraser"] {
   border-color: #ff8800;
   background: rgba(255, 136, 0, 0.15);
@@ -192,7 +198,7 @@ input[type="text"]:focus {
 }
 .action-btn.load:hover { background: #5a4a8b; }
 
-#annotation-list, #center-line-list {
+#annotation-list, #center-line-list, #connector-list {
   max-height: 200px;
   overflow-y: auto;
 }
@@ -227,6 +233,7 @@ input[type="text"]:focus {
 }
 
 .annotation-dot.lane { background: #44ff88; }
+.annotation-dot.connector { background: #4488ff; }
 .annotation-dot.center { background: #ffcc00; }
 
 .annotation-info {

@@ -2,18 +2,25 @@ let MAPBOX_TOKEN = '';
 
 const COLORS = {
   lane: '#44ff88',
+  connector: '#4488ff',
   center: '#ffcc00',
   eraser: '#ff8800'
 };
 
+const SNAP_DISTANCE_PX = 20;
+
 let map;
 let annotations = [];
+let connectors = [];
 let eraserPoints = [];
 let activeAnnotationId = null;
+let activeConnectorId = null;
 let currentMode = 'lane';
 let pointMarkers = [];
+let connectorMarkers = [];
 let eraserMarkers = [];
 let lineCounter = 0;
+let connectorCounter = 0;
 let eraserRadius = 8;
 
 // --- Geo math ---
@@ -90,6 +97,7 @@ function applyCenterLineErasure(centerPoints, erasers, defaultRadius) {
 function findPairs() {
   const byName = {};
   for (const ann of annotations) {
+    if (ann.type !== 'lane') continue;
     if (!byName[ann.name]) byName[ann.name] = [];
     byName[ann.name].push(ann);
   }
@@ -103,6 +111,32 @@ function findPairs() {
     }
   }
   return pairs;
+}
+
+// --- Snap to nearest lane point ---
+
+function snapToLanePoint(clickLngLat) {
+  let bestDist = Infinity;
+  let bestPoint = null;
+
+  for (const ann of annotations) {
+    for (const pt of ann.points) {
+      const projected = map.project([pt.lng, pt.lat]);
+      const clickProjected = map.project([clickLngLat.lng, clickLngLat.lat]);
+      const dx = projected.x - clickProjected.x;
+      const dy = projected.y - clickProjected.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist < bestDist) {
+        bestDist = dist;
+        bestPoint = { lat: pt.lat, lng: pt.lng };
+      }
+    }
+  }
+
+  if (bestDist <= SNAP_DISTANCE_PX && bestPoint) {
+    return bestPoint;
+  }
+  return null;
 }
 
 // --- Center line rendering ---
@@ -216,6 +250,26 @@ function onMapClick(e) {
     addEraserMarker(ep);
     renderCenterLines();
     setStatus(`Placed eraser (${eraserRadius}m radius). ${eraserPoints.length} total.`);
+    return;
+  }
+
+  if (currentMode === 'connector') {
+    if (!activeConnectorId) {
+      setStatus('Click "New Connector" first.');
+      return;
+    }
+    const conn = connectors.find(c => c.id === activeConnectorId);
+    if (!conn) return;
+
+    const snapped = snapToLanePoint(e.lngLat);
+    const addedPoint = snapped || point;
+    conn.points.push(addedPoint);
+    addConnectorMarker(addedPoint, conn.points.length - 1, conn.id, !!snapped);
+    updateConnectorLine(conn);
+    updateConnectorList();
+    setStatus(snapped
+      ? `Snapped to lane point (${conn.points.length} pts)`
+      : `Added free point (${conn.points.length} pts) — no nearby lane point to snap to`);
     return;
   }
 
@@ -333,6 +387,100 @@ function clearAllErasers() {
   setStatus('Cleared all erasers.');
 }
 
+// --- Connector markers ---
+
+function addConnectorMarker(point, index, connectorId, snapped) {
+  const el = document.createElement('div');
+  el.style.width = snapped ? '14px' : '10px';
+  el.style.height = snapped ? '14px' : '10px';
+  el.style.borderRadius = '2px';
+  el.style.background = COLORS.connector;
+  el.style.border = '2px solid white';
+  el.style.cursor = 'pointer';
+  el.style.boxShadow = '0 1px 4px rgba(0,0,0,0.5)';
+  if (snapped) el.style.transform = 'rotate(45deg)';
+
+  const marker = new mapboxgl.Marker({ element: el, draggable: true })
+    .setLngLat([point.lng, point.lat])
+    .addTo(map);
+
+  marker._connectorId = connectorId;
+  marker._pointIndex = index;
+
+  marker.on('dragend', () => {
+    const lngLat = marker.getLngLat();
+    const snappedPt = snapToLanePoint(lngLat);
+    const finalPt = snappedPt || { lat: lngLat.lat, lng: lngLat.lng };
+    const conn = connectors.find(c => c.id === connectorId);
+    if (conn && conn.points[marker._pointIndex]) {
+      conn.points[marker._pointIndex] = finalPt;
+      marker.setLngLat([finalPt.lng, finalPt.lat]);
+      el.style.width = snappedPt ? '14px' : '10px';
+      el.style.height = snappedPt ? '14px' : '10px';
+      el.style.transform = snappedPt ? 'rotate(45deg)' : '';
+      updateConnectorLine(conn);
+    }
+  });
+
+  connectorMarkers.push(marker);
+}
+
+function clearConnectorMarkers(connectorId) {
+  connectorMarkers = connectorMarkers.filter(m => {
+    if (m._connectorId === connectorId) {
+      m.remove();
+      return false;
+    }
+    return true;
+  });
+}
+
+function updateConnectorLine(conn) {
+  const sourceId = `connector-${conn.id}`;
+
+  if (conn.points.length < 2) {
+    if (map.getSource(sourceId)) {
+      map.getSource(sourceId).setData({
+        type: 'Feature',
+        geometry: { type: 'LineString', coordinates: [] }
+      });
+    }
+    return;
+  }
+
+  const coordinates = conn.points.map(p => [p.lng, p.lat]);
+  const geojson = {
+    type: 'Feature',
+    properties: {},
+    geometry: { type: 'LineString', coordinates }
+  };
+
+  if (map.getSource(sourceId)) {
+    map.getSource(sourceId).setData(geojson);
+  } else {
+    map.addSource(sourceId, { type: 'geojson', data: geojson });
+    map.addLayer({
+      id: `layer-connector-${conn.id}`,
+      type: 'line',
+      source: sourceId,
+      paint: {
+        'line-color': COLORS.connector,
+        'line-width': 3,
+        'line-dasharray': [6, 4],
+        'line-opacity': 0.9
+      },
+      layout: { 'line-cap': 'round', 'line-join': 'round' }
+    });
+  }
+}
+
+function removeConnectorFromMap(connectorId) {
+  const layerId = `layer-connector-${connectorId}`;
+  const sourceId = `connector-${connectorId}`;
+  if (map.getLayer(layerId)) map.removeLayer(layerId);
+  if (map.getSource(sourceId)) map.removeSource(sourceId);
+}
+
 // --- Line rendering ---
 
 function updateLine(annotation) {
@@ -399,12 +547,19 @@ function clearMarkersForAnnotation(annotationId) {
 
 function rebuildAllVisuals() {
   clearAllMarkers();
+  connectorMarkers.forEach(m => m.remove());
+  connectorMarkers = [];
   eraserMarkers.forEach(m => m.remove());
   eraserMarkers = [];
 
   annotations.forEach(ann => {
     ann.points.forEach((pt, i) => addPointMarker(pt, i, ann.id));
     updateLine(ann);
+  });
+
+  connectors.forEach(conn => {
+    conn.points.forEach((pt, i) => addConnectorMarker(pt, i, conn.id, true));
+    updateConnectorLine(conn);
   });
 
   eraserPoints.forEach(ep => addEraserMarker(ep));
@@ -478,6 +633,110 @@ function undoEraser() {
   deleteEraserPoint(last.id);
 }
 
+// --- Connector CRUD ---
+
+function newConnector() {
+  const nameInput = document.getElementById('connector-name');
+  connectorCounter++;
+  const name = nameInput.value.trim() || `Connector ${connectorCounter}`;
+
+  const conn = {
+    id: `conn-${Date.now()}-${connectorCounter}`,
+    name,
+    type: 'connector',
+    points: []
+  };
+
+  connectors.push(conn);
+  activeConnectorId = conn.id;
+  updateConnectorList();
+  setStatus(`Started connector "${name}". Click near lane points to snap.`);
+}
+
+function finishConnector() {
+  if (!activeConnectorId) {
+    setStatus('No active connector to finish.');
+    return;
+  }
+  const conn = connectors.find(c => c.id === activeConnectorId);
+  activeConnectorId = null;
+  updateConnectorList();
+  setStatus(`Finished connector "${conn ? conn.name : ''}".`);
+}
+
+function undoConnectorPoint() {
+  if (!activeConnectorId) {
+    setStatus('No active connector selected.');
+    return;
+  }
+  const conn = connectors.find(c => c.id === activeConnectorId);
+  if (!conn || conn.points.length === 0) {
+    setStatus('No points to undo.');
+    return;
+  }
+  conn.points.pop();
+  clearConnectorMarkers(conn.id);
+  conn.points.forEach((pt, i) => addConnectorMarker(pt, i, conn.id, true));
+  updateConnectorLine(conn);
+  updateConnectorList();
+  setStatus(`Removed last connector point. ${conn.points.length} remaining.`);
+}
+
+function deleteConnector(id) {
+  const idx = connectors.findIndex(c => c.id === id);
+  if (idx === -1) return;
+  const name = connectors[idx].name;
+  clearConnectorMarkers(id);
+  removeConnectorFromMap(id);
+  connectors.splice(idx, 1);
+  if (activeConnectorId === id) activeConnectorId = null;
+  updateConnectorList();
+  setStatus(`Deleted connector "${name}".`);
+}
+
+function selectConnector(id) {
+  activeConnectorId = id;
+  activeAnnotationId = null;
+  currentMode = 'connector';
+  document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
+  document.querySelector('[data-mode="connector"]').classList.add('active');
+  toggleModeUI();
+  const conn = connectors.find(c => c.id === id);
+  if (conn) setStatus(`Selected connector "${conn.name}" for editing.`);
+  updateConnectorList();
+  updateAnnotationList();
+}
+
+function updateConnectorList() {
+  const list = document.getElementById('connector-list');
+  const count = document.getElementById('connector-count');
+  count.textContent = connectors.length;
+
+  list.innerHTML = '';
+  if (connectors.length === 0) {
+    list.innerHTML = '<p class="hint">Use Connector mode to draw connections between lanes.</p>';
+    return;
+  }
+  connectors.forEach(conn => {
+    const item = document.createElement('div');
+    item.className = `annotation-item${conn.id === activeConnectorId ? ' selected' : ''}`;
+    item.innerHTML = `
+      <div class="annotation-dot connector"></div>
+      <div class="annotation-info" title="${conn.name}">
+        <div class="annotation-name">${conn.name}</div>
+        <div class="annotation-meta">${conn.points.length} pts</div>
+      </div>
+      <button class="annotation-delete-btn" title="Delete">&times;</button>
+    `;
+    item.querySelector('.annotation-info').addEventListener('click', () => selectConnector(conn.id));
+    item.querySelector('.annotation-delete-btn').addEventListener('click', (e) => {
+      e.stopPropagation();
+      deleteConnector(conn.id);
+    });
+    list.appendChild(item);
+  });
+}
+
 function deleteAnnotation(id) {
   const idx = annotations.findIndex(a => a.id === id);
   if (idx === -1) return;
@@ -496,6 +755,7 @@ function deleteAnnotation(id) {
 
 function selectAnnotation(id) {
   activeAnnotationId = id;
+  activeConnectorId = null;
   const ann = annotations.find(a => a.id === id);
   if (ann) {
     currentMode = 'lane';
@@ -505,6 +765,7 @@ function selectAnnotation(id) {
     setStatus(`Selected "${ann.name}" for editing. Click to add more points.`);
   }
   updateAnnotationList();
+  updateConnectorList();
 }
 
 function updateAnnotationList() {
@@ -546,6 +807,12 @@ async function saveAnnotations() {
       type: ann.type,
       points: ann.points.map(p => ({ lat: p.lat, lng: p.lng }))
     })),
+    connectors: connectors.map(conn => ({
+      id: conn.id,
+      name: conn.name,
+      type: conn.type,
+      points: conn.points.map(p => ({ lat: p.lat, lng: p.lng }))
+    })),
     eraserPoints: eraserPoints.map(ep => ({
       id: ep.id,
       lat: ep.lat,
@@ -567,7 +834,7 @@ async function saveAnnotations() {
     });
     const result = await res.json();
     if (result.success) {
-      setStatus(`Saved ${result.count} lane(s) + ${eraserPoints.length} eraser(s)`);
+      setStatus(`Saved ${result.count} lane(s), ${connectors.length} connector(s), ${eraserPoints.length} eraser(s)`);
     } else {
       setStatus(`Save failed: ${result.error}`);
     }
@@ -585,17 +852,24 @@ async function loadAnnotations() {
       clearMarkersForAnnotation(ann.id);
       removeLineFromMap(ann.id);
     });
+    connectors.forEach(conn => {
+      clearConnectorMarkers(conn.id);
+      removeConnectorFromMap(conn.id);
+    });
     clearCenterLines();
     eraserMarkers.forEach(m => m.remove());
     eraserMarkers = [];
 
     annotations = data.annotations || [];
+    connectors = data.connectors || [];
     eraserPoints = data.eraserPoints || [];
     activeAnnotationId = null;
+    activeConnectorId = null;
 
     rebuildAllVisuals();
     updateAnnotationList();
-    setStatus(`Loaded ${annotations.length} lane(s) + ${eraserPoints.length} eraser(s)`);
+    updateConnectorList();
+    setStatus(`Loaded ${annotations.length} lane(s), ${connectors.length} connector(s), ${eraserPoints.length} eraser(s)`);
   } catch (err) {
     setStatus(`Load error: ${err.message}`);
   }
@@ -605,14 +879,15 @@ async function loadAnnotations() {
 
 function toggleModeUI() {
   const laneControls = document.getElementById('lane-controls');
+  const connectorControls = document.getElementById('connector-controls');
   const eraserControls = document.getElementById('eraser-controls');
-  if (currentMode === 'eraser') {
-    laneControls.classList.add('hidden');
-    eraserControls.classList.remove('hidden');
-  } else {
-    laneControls.classList.remove('hidden');
-    eraserControls.classList.add('hidden');
-  }
+  laneControls.classList.add('hidden');
+  connectorControls.classList.add('hidden');
+  eraserControls.classList.add('hidden');
+
+  if (currentMode === 'lane') laneControls.classList.remove('hidden');
+  else if (currentMode === 'connector') connectorControls.classList.remove('hidden');
+  else if (currentMode === 'eraser') eraserControls.classList.remove('hidden');
 }
 
 function setStatus(msg) {
@@ -629,9 +904,17 @@ document.querySelectorAll('.mode-btn').forEach(btn => {
     toggleModeUI();
     if (currentMode === 'eraser') {
       activeAnnotationId = null;
+      activeConnectorId = null;
       updateAnnotationList();
+      updateConnectorList();
       setStatus('Eraser mode: click near a center line to erase a section.');
+    } else if (currentMode === 'connector') {
+      activeAnnotationId = null;
+      updateAnnotationList();
+      setStatus('Connector mode: click "New Connector" then click near lane points to snap.');
     } else {
+      activeConnectorId = null;
+      updateConnectorList();
       setStatus('Lane mode: click "New Line" to start drawing a lane boundary.');
     }
   });
@@ -650,6 +933,16 @@ document.getElementById('btn-delete').addEventListener('click', () => {
     deleteAnnotation(activeAnnotationId);
   } else {
     setStatus('No line selected to delete.');
+  }
+});
+document.getElementById('btn-new-connector').addEventListener('click', newConnector);
+document.getElementById('btn-finish-connector').addEventListener('click', finishConnector);
+document.getElementById('btn-undo-connector').addEventListener('click', undoConnectorPoint);
+document.getElementById('btn-delete-connector').addEventListener('click', () => {
+  if (activeConnectorId) {
+    deleteConnector(activeConnectorId);
+  } else {
+    setStatus('No connector selected to delete.');
   }
 });
 document.getElementById('btn-undo-eraser').addEventListener('click', undoEraser);

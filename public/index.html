@@ -19,6 +19,7 @@
       <label>Mode</label>
       <div class="mode-buttons">
         <button id="btn-lane" class="mode-btn active" data-mode="lane">Lane</button>
+        <button id="btn-connector" class="mode-btn" data-mode="connector">Connector</button>
         <button id="btn-eraser" class="mode-btn" data-mode="eraser">Eraser</button>
       </div>
     </div>
@@ -34,6 +35,20 @@
       <div class="btn-row">
         <button id="btn-undo" class="action-btn undo">Undo Point</button>
         <button id="btn-delete" class="action-btn delete">Delete Line</button>
+      </div>
+    </div>
+
+    <div class="section hidden" id="connector-controls">
+      <label for="connector-name">Connector Name</label>
+      <input type="text" id="connector-name" placeholder="e.g. Palm-Serra Junction">
+      <p class="hint">Points snap to nearby lane boundary points. Click near a lane point to connect.</p>
+      <div class="btn-row" style="margin-top: 6px;">
+        <button id="btn-new-connector" class="action-btn new">New Connector</button>
+        <button id="btn-finish-connector" class="action-btn finish">Finish</button>
+      </div>
+      <div class="btn-row">
+        <button id="btn-undo-connector" class="action-btn undo">Undo Point</button>
+        <button id="btn-delete-connector" class="action-btn delete">Delete</button>
       </div>
     </div>
 
@@ -60,6 +75,11 @@
     <div class="section">
       <label>Center Lines (auto)</label>
       <div id="center-line-list"></div>
+    </div>
+
+    <div class="section">
+      <label>Connectors (<span id="connector-count">0</span>)</label>
+      <div id="connector-list"></div>
     </div>
 
     <div class="section">
