@@ -125,9 +125,15 @@ function resampleLine(points, numSamples) {
 }
 
 function computeCenterLine(line1, line2) {
-  const n = Math.max(line1.length, line2.length, 20);
+  const dSame = haversineMeters(line1[0], line2[0])
+    + haversineMeters(line1[line1.length - 1], line2[line2.length - 1]);
+  const dRev = haversineMeters(line1[0], line2[line2.length - 1])
+    + haversineMeters(line1[line1.length - 1], line2[0]);
+  const l2 = dRev < dSame ? [...line2].reverse() : line2;
+
+  const n = Math.max(line1.length, l2.length, 20);
   const a = resampleLine(line1, n);
-  const b = resampleLine(line2, n);
+  const b = resampleLine(l2, n);
   return a.map((p, i) => ({
     lat: (p.lat + b[i].lat) / 2,
     lng: (p.lng + b[i].lng) / 2
@@ -942,7 +948,10 @@ function selectConnector(id) {
   document.querySelector('[data-mode="connector"]').classList.add('active');
   toggleModeUI();
   const conn = connectors.find(c => c.id === id);
-  if (conn) setStatus(`Selected connector "${conn.name}" for editing.`);
+  if (conn) {
+    document.getElementById('connector-name').value = conn.name;
+    setStatus(`Selected connector "${conn.name}" for editing.`);
+  }
   updateConnectorList();
   updateAnnotationList();
 }
@@ -1003,6 +1012,7 @@ function selectAnnotation(id) {
     document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
     document.querySelector('[data-mode="lane"]').classList.add('active');
     toggleModeUI();
+    document.getElementById('line-name').value = ann.name;
     setStatus(`Selected "${ann.name}" for editing. Click to add more points.`);
   }
   updateAnnotationList();
@@ -1164,6 +1174,27 @@ document.querySelectorAll('.mode-btn').forEach(btn => {
 document.getElementById('eraser-radius').addEventListener('input', (e) => {
   eraserRadius = parseInt(e.target.value);
   document.getElementById('eraser-radius-val').textContent = `${eraserRadius}m`;
+});
+
+document.getElementById('line-name').addEventListener('input', (e) => {
+  if (!activeAnnotationId) return;
+  const ann = annotations.find(a => a.id === activeAnnotationId);
+  if (ann) {
+    ann.name = e.target.value.trim() || ann.name;
+    updateAnnotationList();
+    renderCenterLines();
+    scheduleAutoSave();
+  }
+});
+
+document.getElementById('connector-name').addEventListener('input', (e) => {
+  if (!activeConnectorId) return;
+  const conn = connectors.find(c => c.id === activeConnectorId);
+  if (conn) {
+    conn.name = e.target.value.trim() || conn.name;
+    updateConnectorList();
+    scheduleAutoSave();
+  }
 });
 
 document.getElementById('btn-new').addEventListener('click', newLine);
