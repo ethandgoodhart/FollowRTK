@@ -43,6 +43,7 @@ import websockets
 from . import config
 from .cart import Cart
 from .follow import PathFollower, FollowConfig
+from .livepub import set_command_handler
 
 WS_PORT = 8765
 
@@ -362,6 +363,36 @@ def _open_cart(gps_only: bool) -> Cart:
     return cart
 
 
+def _handle_remote_command(cmd: str, data: dict) -> dict:
+    """Handle commands from the Cloudflare tunnel (livepub HTTP endpoints)."""
+    if cmd == "start":
+        dest = data.get("destination")
+        if not dest:
+            return {"ok": False, "reason": "no destination set"}
+        fix = _cart.gps.latest if (_cart and _cart.gps) else None
+        if not fix:
+            return {"ok": False, "reason": "no GPS fix"}
+        path = [
+            {"lat": fix["lat"], "lon": fix["lon"]},
+            {"lat": dest[0], "lon": dest[1]},
+        ]
+        print(f"[server] remote start: ({fix['lat']:.6f},{fix['lon']:.6f}) -> ({dest[0]:.6f},{dest[1]:.6f})")
+        return start_drive(path, _default_max_speed_mph, True, {})
+
+    elif cmd == "stop":
+        emergency = bool(data.get("emergency", False))
+        stop_drive(emergency=emergency)
+        return {"ok": True, "stopped": True, "emergency": emergency}
+
+    elif cmd == "status":
+        with _drive_lock:
+            driving = _active_follower is not None
+            phase = _active_follower.state.phase if _active_follower else None
+        return {"ok": True, "driving": driving, "phase": phase}
+
+    return {"ok": False, "reason": f"unknown command: {cmd}"}
+
+
 async def _main_async(args) -> None:
     global _loop, _cart, _default_max_speed, _default_max_speed_mph
     _loop = asyncio.get_running_loop()
@@ -371,6 +402,9 @@ async def _main_async(args) -> None:
     _cart = _open_cart(gps_only=args.gps_only)
     have = [n for n in ("gps", "pedals", "steering") if getattr(_cart, n)]
     print(f"[server] cart subsystems online: {', '.join(have) or 'none'}")
+
+    set_command_handler(_handle_remote_command)
+    print("[server] remote command handler registered (tunnel API ready)")
 
     ntrip = None
     if args.ntrip and _cart.gps:

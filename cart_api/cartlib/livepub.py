@@ -51,6 +51,14 @@ tick(); setInterval(tick, 1000);
 """
 
 _server: Optional[ThreadingHTTPServer] = None
+_command_handler: Optional[Callable[[str, dict], dict]] = None
+_pending_destination: Optional[tuple] = None  # (lat, lon)
+
+
+def set_command_handler(handler: Callable[[str, dict], dict]) -> None:
+    """Register a callback for remote commands (called from server.py)."""
+    global _command_handler
+    _command_handler = handler
 
 
 def start_live_publisher(get_fix: Callable[[], Optional[dict]]) -> None:
@@ -68,11 +76,63 @@ def start_live_publisher(get_fix: Callable[[], Optional[dict]]) -> None:
             self.end_headers()
             self.wfile.write(body)
 
+        def _send_json(self, obj: dict) -> None:
+            self._send(json.dumps(obj).encode(), "application/json")
+
+        def _read_body(self) -> dict:
+            length = int(self.headers.get("Content-Length", 0))
+            raw = self.rfile.read(length) if length else b"{}"
+            try:
+                return json.loads(raw)
+            except (ValueError, TypeError):
+                return {}
+
         def do_GET(self) -> None:
             if self.path.startswith("/coords.json"):
                 self._send(json.dumps(get_fix() or {}).encode(), "application/json")
+            elif self.path.startswith("/api/status"):
+                if _command_handler:
+                    self._send_json(_command_handler("status", {}))
+                else:
+                    self._send_json({"ok": False, "reason": "not ready"})
             else:
                 self._send(_PAGE.encode(), "text/html; charset=utf-8")
+
+        def do_POST(self) -> None:
+            global _pending_destination
+            data = self._read_body()
+
+            if self.path == "/api/destination":
+                lat = data.get("lat")
+                lon = data.get("lon")
+                if lat is not None and lon is not None:
+                    _pending_destination = (float(lat), float(lon))
+                    print(f"[livepub] destination set: {_pending_destination}")
+                    self._send_json({"ok": True, "lat": lat, "lon": lon})
+                else:
+                    self._send_json({"ok": False, "reason": "need lat and lon"})
+
+            elif self.path == "/api/start":
+                if data.get("lat") is not None and data.get("lon") is not None:
+                    _pending_destination = (float(data["lat"]), float(data["lon"]))
+                if _pending_destination is None:
+                    self._send_json({"ok": False, "reason": "no destination set"})
+                elif _command_handler:
+                    result = _command_handler("start", {"destination": _pending_destination})
+                    self._send_json(result)
+                else:
+                    self._send_json({"ok": False, "reason": "cart not ready"})
+
+            elif self.path == "/api/stop":
+                emergency = bool(data.get("emergency", False))
+                if _command_handler:
+                    result = _command_handler("stop", {"emergency": emergency})
+                    self._send_json(result)
+                else:
+                    self._send_json({"ok": False, "reason": "cart not ready"})
+
+            else:
+                self.send_error(404)
 
         def log_message(self, *args) -> None:  # keep the console quiet
             pass
