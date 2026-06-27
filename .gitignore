@@ -1,3 +1,21 @@
 node_modules/
 annotations.json
 .env
+
+# runtime logs & process output
+*.log
+golive.out
+
+# map annotation backups (local snapshots)
+annotations.backup-*.json
+
+# python caches & test caches
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# cart runtime artifacts
+cart_api/last_drive.json
+
+# build artifacts
+*.tsbuildinfo

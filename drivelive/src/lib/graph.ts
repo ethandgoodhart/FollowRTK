@@ -1,17 +1,31 @@
 import { LatLng, CenterLine, GraphNode } from './types';
 import { haversineMeters } from './geo';
 
+// Weld vertices from different center lines that are within this distance into
+// a single graph node. Closes sub-metre/few-metre gaps where a connector
+// endpoint or an adjacent lane doesn't land on the exact same coordinate,
+// which would otherwise leave the routing graph fragmented. Kept small so it
+// only merges true near-misses (well under a lane width) and never invents
+// shortcuts between distinct roads.
+const WELD_TOLERANCE_M = 3;
+
 function nodeId(p: LatLng): string {
   return `${p.lat.toFixed(8)},${p.lng.toFixed(8)}`;
 }
 
 function getOrCreateNode(graph: Map<string, GraphNode>, p: LatLng): GraphNode {
   const id = nodeId(p);
-  let node = graph.get(id);
-  if (!node) {
-    node = { id, lat: p.lat, lng: p.lng, neighbors: [] };
-    graph.set(id, node);
+  const exact = graph.get(id);
+  if (exact) return exact;
+
+  // Proximity weld: reuse a nearby existing node (keeping its real coordinate
+  // so the driven path follows true center-line geometry, not a snapped grid).
+  for (const node of graph.values()) {
+    if (haversineMeters(p, node) <= WELD_TOLERANCE_M) return node;
   }
+
+  const node: GraphNode = { id, lat: p.lat, lng: p.lng, neighbors: [] };
+  graph.set(id, node);
   return node;
 }
 

@@ -1,14 +1,14 @@
 'use client';
 
 import { useReducer, useCallback, useMemo, useEffect } from 'react';
-import { LatLng, GpsPosition, GraphNode, RouteState } from '@/lib/types';
-import { totalPolylineLength } from '@/lib/geo';
+import { LatLng, GpsPosition, GraphNode, RouteState, CenterLine } from '@/lib/types';
+import { smoothRouteTurns, totalPolylineLength, offsetToRightLane } from '@/lib/geo';
 import { findNearestNode, dijkstra } from '@/lib/graph';
 import { snapToRoute, computeRouteProgress, computeEta } from '@/lib/route-tracking';
 
 type Action =
   | { type: 'SET_SELECTING'; selecting: 'start' | 'end' | 'none' }
-  | { type: 'SET_START'; point: LatLng }
+  | { type: 'SET_START_AUTO'; point: LatLng }
   | { type: 'SET_END'; point: LatLng }
   | { type: 'SET_PATH'; path: LatLng[]; totalDistance: number }
   | { type: 'UPDATE_PROGRESS'; distanceRemaining: number; progress: number; eta: number | null; nearestRoutePoint: LatLng }
@@ -30,8 +30,9 @@ function reducer(state: RouteState, action: Action): RouteState {
   switch (action.type) {
     case 'SET_SELECTING':
       return { ...state, selecting: action.selecting };
-    case 'SET_START':
-      return { ...state, startPoint: action.point, selecting: 'none', path: [], totalDistance: 0 };
+    case 'SET_START_AUTO':
+      // Start always tracks our live position; never clears the chosen end.
+      return { ...state, startPoint: action.point };
     case 'SET_END':
       return { ...state, endPoint: action.point, selecting: 'none' };
     case 'SET_PATH':
@@ -39,7 +40,8 @@ function reducer(state: RouteState, action: Action): RouteState {
     case 'UPDATE_PROGRESS':
       return { ...state, distanceRemaining: action.distanceRemaining, progress: action.progress, eta: action.eta, nearestRoutePoint: action.nearestRoutePoint };
     case 'CLEAR':
-      return initialState;
+      // Clearing drops the destination/route but keeps the live start.
+      return { ...initialState, startPoint: state.startPoint };
     default:
       return state;
   }
@@ -48,48 +50,58 @@ function reducer(state: RouteState, action: Action): RouteState {
 export function useRoute(
   graph: Map<string, GraphNode>,
   gpsPosition: GpsPosition | null,
-  speed: number
+  speed: number,
+  laneCenterLines: CenterLine[] = []
 ) {
   const [state, dispatch] = useReducer(reducer, initialState);
 
-  const selectStart = useCallback(() => dispatch({ type: 'SET_SELECTING', selecting: 'start' }), []);
   const selectEnd = useCallback(() => dispatch({ type: 'SET_SELECTING', selecting: 'end' }), []);
   const clearRoute = useCallback(() => dispatch({ type: 'CLEAR' }), []);
 
+  // Start point IS our precise live GPS position (not snapped to the road).
+  // Updates every fix; it's the exact origin the route is drawn/driven from.
+  useEffect(() => {
+    if (!gpsPosition) return;
+    dispatch({ type: 'SET_START_AUTO', point: { lat: gpsPosition.lat, lng: gpsPosition.lon } });
+  }, [gpsPosition?.lat, gpsPosition?.lon]);
+
+  // Clicking the map sets the DESTINATION (start is automatic).
   const handleMapClick = useCallback(
     (latlng: LatLng) => {
-      if (state.selecting === 'none') return;
+      if (state.selecting !== 'end') return;
       const nodeId = findNearestNode(latlng, graph);
       if (!nodeId) return;
       const node = graph.get(nodeId);
       if (!node) return;
-      const point = { lat: node.lat, lng: node.lng };
-
-      if (state.selecting === 'start') {
-        dispatch({ type: 'SET_START', point });
-      } else {
-        dispatch({ type: 'SET_END', point });
-      }
+      dispatch({ type: 'SET_END', point: { lat: node.lat, lng: node.lng } });
     },
     [state.selecting, graph]
   );
 
-  // Compute route when both points are set
-  const routePath = useMemo(() => {
-    if (!state.startPoint || !state.endPoint) return null;
-    const startId = findNearestNode(state.startPoint, graph);
-    const endId = findNearestNode(state.endPoint, graph);
-    if (!startId || !endId) return null;
-    return dijkstra(graph, startId, endId);
-  }, [state.startPoint, state.endPoint, graph]);
+  // The lane-network entry/exit nodes. These only change when the cart crosses
+  // to a new nearest vertex, so Dijkstra below isn't re-run on every GPS fix.
+  const startEntryId = useMemo(
+    () => (state.startPoint ? findNearestNode(state.startPoint, graph) : null),
+    [state.startPoint, graph]
+  );
+  const endId = useMemo(
+    () => (state.endPoint ? findNearestNode(state.endPoint, graph) : null),
+    [state.endPoint, graph]
+  );
+
+  // Core route along the lane network (entry node -> destination node).
+  const corePath = useMemo(() => {
+    if (!startEntryId || !endId) return null;
+    return dijkstra(graph, startEntryId, endId);
+  }, [startEntryId, endId, graph]);
 
   useEffect(() => {
-    if (routePath && routePath.length >= 2) {
-      dispatch({ type: 'SET_PATH', path: routePath, totalDistance: totalPolylineLength(routePath) });
+    if (corePath && corePath.length >= 1) {
+      dispatch({ type: 'SET_PATH', path: corePath, totalDistance: totalPolylineLength(corePath) });
     }
-  }, [routePath]);
+  }, [corePath]);
 
-  // Track progress along route
+  // Track progress along the route (snap the live position onto it).
   useEffect(() => {
     if (!gpsPosition || state.path.length < 2) return;
     const pos = { lat: gpsPosition.lat, lng: gpsPosition.lon };
@@ -106,9 +118,28 @@ export function useRoute(
     });
   }, [gpsPosition, state.path, speed]);
 
+  // Path exposed to the map + cart: the PURE lane centerline (the ideal line to
+  // sit on), NOT prefixed with the live off-center GPS position. The cart's job
+  // is to drive onto and hold this line; the orange recovery curve shows how it
+  // gets there from wherever it currently is.
+  const path = useMemo(() => {
+    if (state.path.length < 2) return state.path;
+    // Smooth the turns, then shift lane portions into the right lane (the yellow
+    // center lines are dividers, so we drive to the right of them); connectors
+    // stay on their center line. Offset first so smoothing eases the lane↔
+    // connector hand-offs.
+    return smoothRouteTurns(offsetToRightLane(state.path, laneCenterLines));
+  }, [state.path, laneCenterLines]);
+
+  const totalDistance = useMemo(() => {
+    if (path.length < 2) return state.totalDistance;
+    return totalPolylineLength(path);
+  }, [path, state.totalDistance]);
+
   return {
     ...state,
-    selectStart,
+    path,
+    totalDistance,
     selectEnd,
     handleMapClick,
     clearRoute,

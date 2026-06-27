@@ -10,19 +10,13 @@ const FIX_LABELS: Record<number, { label: string; color: string }> = {
   0: { label: 'NO FIX', color: 'bg-neutral-700 text-neutral-400' },
 };
 
-function compassDir(deg: number): string {
-  const dirs = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
-  return dirs[Math.round(deg / 45) % 8];
-}
-
 interface Props {
   position: GpsPosition | null;
   speed: number;
-  heading: number | null;
   isConnected: boolean;
 }
 
-export default function GpsInfoPanel({ position, speed, heading, isConnected }: Props) {
+export default function GpsInfoPanel({ position, speed, isConnected }: Props) {
   const fix = FIX_LABELS[position?.fix_code ?? 0] ?? FIX_LABELS[0];
 
   return (
@@ -37,7 +31,7 @@ export default function GpsInfoPanel({ position, speed, heading, isConnected }: 
           {fix.label}
         </span>
         <span className="text-3xl font-bold text-white tabular-nums">
-          {speed.toFixed(1)} <span className="text-sm text-neutral-400 font-normal">km/h</span>
+          {speed.toFixed(1)} <span className="text-sm text-neutral-400 font-normal">mph</span>
         </span>
       </div>
 
@@ -57,11 +51,6 @@ export default function GpsInfoPanel({ position, speed, heading, isConnected }: 
               Alt <span className="text-neutral-300 font-semibold">{position.alt.toFixed(0)}m</span>
             </div>
           </div>
-          {heading !== null && (
-            <div className="mt-2 text-xs text-neutral-500">
-              Heading <span className="text-neutral-300 font-semibold">{heading.toFixed(0)}° {compassDir(heading)}</span>
-            </div>
-          )}
         </>
       )}
 

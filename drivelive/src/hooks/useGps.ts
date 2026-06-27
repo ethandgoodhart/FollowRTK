@@ -1,18 +1,28 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { GpsPosition } from '@/lib/types';
+import { GpsPosition, FollowState } from '@/lib/types';
 
 const MAX_HISTORY = 500;
 
 export function useGps(wsUrl: string) {
   const [position, setPosition] = useState<GpsPosition | null>(null);
   const [isConnected, setIsConnected] = useState(false);
+  const [follow, setFollow] = useState<FollowState | null>(null);
   const historyRef = useRef<GpsPosition[]>([]);
   const [historyVersion, setHistoryVersion] = useState(0);
   const wsRef = useRef<WebSocket | null>(null);
 
   const getHistory = useCallback(() => historyRef.current, []);
+
+  const sendCommand = useCallback((obj: object) => {
+    const ws = wsRef.current;
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify(obj));
+      return true;
+    }
+    return false;
+  }, []);
 
   useEffect(() => {
     let reconnectTimer: ReturnType<typeof setTimeout>;
@@ -39,6 +49,10 @@ export function useGps(wsUrl: string) {
             setPosition(historyRef.current[historyRef.current.length - 1]);
           }
           setHistoryVersion((v) => v + 1);
+        } else if (msg.type === 'follow') {
+          setFollow({ ...(msg.data as FollowState), active: true });
+        } else if (msg.type === 'follow_end') {
+          setFollow({ ...(msg.data as FollowState), active: false });
         }
       };
 
@@ -59,5 +73,5 @@ export function useGps(wsUrl: string) {
     };
   }, [wsUrl]);
 
-  return { position, isConnected, getHistory, historyVersion };
+  return { position, isConnected, getHistory, historyVersion, follow, sendCommand };
 }
