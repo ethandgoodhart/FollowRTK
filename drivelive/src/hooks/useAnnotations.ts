@@ -2,7 +2,7 @@
 
 import { useMemo } from 'react';
 import { RawAnnotations, CenterLine, LatLng } from '@/lib/types';
-import { computeCenterLine, haversineMeters, pairMetrics, centerlineAsymmetry } from '@/lib/geo';
+import { computeCenterLine, pairMetrics, centerlineAsymmetry } from '@/lib/geo';
 import { buildGraph } from '@/lib/graph';
 
 interface Boundary { id: string; name: string; points: LatLng[] }
@@ -58,24 +58,6 @@ function findGeometricPairs(items: Boundary[]) {
   return pairs;
 }
 
-// Snap a connector endpoint onto the nearest lane center-line vertex so the
-// connector welds into the routable network (endpoints were drawn snapped to
-// lane boundaries in the editor; this re-snaps to the derived center lines).
-function nearestPoint(target: LatLng, lines: LatLng[][], maxDist = 12): LatLng | null {
-  let best: LatLng | null = null;
-  let bestDist = maxDist;
-  for (const line of lines) {
-    for (const pt of line) {
-      const d = haversineMeters(target, pt);
-      if (d < bestDist) {
-        bestDist = d;
-        best = { lat: pt.lat, lng: pt.lng };
-      }
-    }
-  }
-  return best;
-}
-
 export function useAnnotations(raw: RawAnnotations) {
   return useMemo(() => {
     const suppressed = new Set(raw.suppressedAutoCenterLineIds ?? []);
@@ -86,7 +68,6 @@ export function useAnnotations(raw: RawAnnotations) {
     );
 
     const laneCenterLines: CenterLine[] = [];
-    const laneCenterPoints: LatLng[][] = [];
 
     // Manual center lines first: the user hand-drew these to replace a
     // suppressed auto pair, so they are the source of truth — drawn as-is,
@@ -95,7 +76,6 @@ export function useAnnotations(raw: RawAnnotations) {
       if (!manual.points || manual.points.length < 2) continue;
       const points = manual.points.map((p) => ({ lat: p.lat, lng: p.lng }));
       laneCenterLines.push({ name: manual.name, type: 'lane', points });
-      laneCenterPoints.push(points);
     }
 
     for (const pair of lanePairs) {
@@ -111,7 +91,6 @@ export function useAnnotations(raw: RawAnnotations) {
       // right lane — this center line is the divider, not the drive line.
       const width = pairMetrics(pair.a.points, pair.b.points)?.avgDistance;
       laneCenterLines.push({ name: pair.name, type: 'lane', points, width });
-      laneCenterPoints.push(points);
     }
 
     // Connectors are drawn as boundary polylines — the two SIDES of a connector
@@ -119,18 +98,16 @@ export function useAnnotations(raw: RawAnnotations) {
     // geometrically and run the route down the bisecting center line, exactly
     // like lanes, so the purple route sits in the MIDDLE of the blue connector
     // boundaries instead of hugging one edge. Strokes with no geometric partner
-    // fall back to being used as-is. Either way both endpoints are snapped onto
-    // the lane center-line network so connectors weld into the routable graph.
-    const snapEnds = (points: LatLng[]): LatLng[] => {
-      if (points.length >= 2 && laneCenterPoints.length > 0) {
-        const snapFirst = nearestPoint(points[0], laneCenterPoints);
-        const snapLast = nearestPoint(points[points.length - 1], laneCenterPoints);
-        if (snapFirst) points[0] = snapFirst;
-        if (snapLast) points[points.length - 1] = snapLast;
-      }
-      return points;
-    };
-
+    // fall back to being used as-is.
+    //
+    // We deliberately DON'T snap connector endpoints onto lane center lines.
+    // That used to be how connectors welded into the graph, but on a short
+    // connector (a few metres) yanking BOTH ends several metres onto the
+    // nearest center line distorts the whole stroke into a sharp kink — the
+    // "dent" seen at tight intersections. Connectivity is instead handled
+    // purely in the graph: the 3 m vertex weld plus the direction-aware stitch
+    // pass in buildGraph() bridge each connector end into the network while
+    // leaving its drawn geometry untouched, so the turn stays a smooth arc.
     const connBoundaries: Boundary[] = raw.connectors
       .filter((c) => c.points && c.points.length >= 2)
       .map((c) => ({ id: c.id, name: c.name, points: c.points.map((p) => ({ lat: p.lat, lng: p.lng })) }));
@@ -144,13 +121,13 @@ export function useAnnotations(raw: RawAnnotations) {
       if (centerlineAsymmetry(points, pair.a.points, pair.b.points) > MAX_CENTERLINE_ASYMMETRY) continue;
       pairedConn.add(pair.a);
       pairedConn.add(pair.b);
-      connCenterLines.push({ name: pair.name, type: 'connector', points: snapEnds(points) });
+      connCenterLines.push({ name: pair.name, type: 'connector', points });
     }
 
     // Lone connector strokes with no geometric partner: use the polyline as-is.
     for (const b of connBoundaries) {
       if (pairedConn.has(b)) continue;
-      connCenterLines.push({ name: b.name, type: 'connector', points: snapEnds(b.points.map((p) => ({ ...p }))) });
+      connCenterLines.push({ name: b.name, type: 'connector', points: b.points.map((p) => ({ ...p })) });
     }
 
     const allCenterLines = [...laneCenterLines, ...connCenterLines];

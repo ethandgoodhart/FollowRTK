@@ -2,7 +2,7 @@
 
 import { useReducer, useCallback, useMemo, useEffect } from 'react';
 import { LatLng, GpsPosition, GraphNode, RouteState, CenterLine } from '@/lib/types';
-import { smoothRouteTurns, totalPolylineLength, offsetToRightLane } from '@/lib/geo';
+import { smoothRouteTurns, totalPolylineLength, offsetToRightLane, straightenThroughConnectors } from '@/lib/geo';
 import { findNearestNode, dijkstra } from '@/lib/graph';
 import { snapToRoute, computeRouteProgress, computeEta } from '@/lib/route-tracking';
 
@@ -51,7 +51,11 @@ export function useRoute(
   graph: Map<string, GraphNode>,
   gpsPosition: GpsPosition | null,
   speed: number,
-  laneCenterLines: CenterLine[] = []
+  laneCenterLines: CenterLine[] = [],
+  connCenterLines: CenterLine[] = [],
+  // Curve smoothing knob: how many meters of corner to round off at each turn.
+  // Higher = smoother/rounder turns; lower = sharper, more elbow-shaped corners.
+  cornerCut = 3.5
 ) {
   const [state, dispatch] = useReducer(reducer, initialState);
 
@@ -124,12 +128,16 @@ export function useRoute(
   // gets there from wherever it currently is.
   const path = useMemo(() => {
     if (state.path.length < 2) return state.path;
-    // Smooth the turns, then shift lane portions into the right lane (the yellow
-    // center lines are dividers, so we drive to the right of them); connectors
-    // stay on their center line. Offset first so smoothing eases the lane↔
-    // connector hand-offs.
-    return smoothRouteTurns(offsetToRightLane(state.path, laneCenterLines));
-  }, [state.path, laneCenterLines]);
+    // 1) Through intersections, drop the noisy connector geometry: run each
+    //    street straight to the junction and connect directly to the next
+    //    street, leaving the turn itself for smoothing to round.
+    // 2) Shift lane portions into the right lane (the yellow center lines are
+    //    dividers, so we drive to the right of them); the direct intersection
+    //    links stay un-offset.
+    // 3) Smooth: round the direct joins (and every other corner) into arcs.
+    const straight = straightenThroughConnectors(state.path, laneCenterLines, connCenterLines);
+    return smoothRouteTurns(offsetToRightLane(straight, laneCenterLines), cornerCut);
+  }, [state.path, laneCenterLines, connCenterLines, cornerCut]);
 
   const totalDistance = useMemo(() => {
     if (path.length < 2) return state.totalDistance;

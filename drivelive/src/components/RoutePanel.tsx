@@ -18,9 +18,11 @@ interface Props {
   route: RouteState;
   onSelectEnd: () => void;
   onClear: () => void;
+  cornerCut: number;
+  onCornerCutChange: (value: number) => void;
 }
 
-export default function RoutePanel({ route, onSelectEnd, onClear }: Props) {
+export default function RoutePanel({ route, onSelectEnd, onClear, cornerCut, onCornerCutChange }: Props) {
   const hasRoute = route.path.length >= 2;
 
   return (
@@ -51,6 +53,26 @@ export default function RoutePanel({ route, onSelectEnd, onClear }: Props) {
         >
           Clear
         </button>
+      </div>
+
+      <div className="mb-3">
+        <div className="flex items-center justify-between text-[11px] mb-1">
+          <span className="font-semibold uppercase tracking-wide text-neutral-500">Curve smoothing</span>
+          <span className="tabular-nums text-neutral-300">{cornerCut.toFixed(1)}m</span>
+        </div>
+        <input
+          type="range"
+          min={0}
+          max={10}
+          step={0.5}
+          value={cornerCut}
+          onChange={(e) => onCornerCutChange(Number(e.target.value))}
+          className="w-full accent-purple-500"
+        />
+        <div className="flex justify-between text-[9px] text-neutral-600 mt-0.5">
+          <span>sharp / elbow</span>
+          <span>wide / smooth</span>
+        </div>
       </div>
 
       {route.selecting === 'end' && (

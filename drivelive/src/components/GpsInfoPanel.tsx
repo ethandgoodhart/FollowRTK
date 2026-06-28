@@ -1,6 +1,7 @@
 'use client';
 
 import { GpsPosition } from '@/lib/types';
+import { estimateAccuracyM, formatAccuracy } from '@/lib/geo';
 
 const FIX_LABELS: Record<number, { label: string; color: string }> = {
   4: { label: 'RTK FIX', color: 'bg-green-700 text-green-300' },
@@ -10,6 +11,15 @@ const FIX_LABELS: Record<number, { label: string; color: string }> = {
   0: { label: 'NO FIX', color: 'bg-neutral-700 text-neutral-400' },
 };
 
+// Colour the accuracy readout by how tight the fix is.
+function accuracyColor(meters: number | null): string {
+  if (meters === null) return 'text-neutral-500';
+  if (meters <= 0.05) return 'text-green-400';   // centimetre RTK
+  if (meters <= 0.5) return 'text-yellow-400';   // decimetre (float)
+  if (meters <= 1.5) return 'text-orange-400';
+  return 'text-red-400';                          // metre-level
+}
+
 interface Props {
   position: GpsPosition | null;
   speed: number;
@@ -18,9 +28,10 @@ interface Props {
 
 export default function GpsInfoPanel({ position, speed, isConnected }: Props) {
   const fix = FIX_LABELS[position?.fix_code ?? 0] ?? FIX_LABELS[0];
+  const accuracyM = position ? estimateAccuracyM(position.fix_code, position.hdop) : null;
 
   return (
-    <div className="absolute top-3 left-3 z-10 w-64 rounded-xl bg-neutral-900/90 backdrop-blur-md p-4 text-sm text-neutral-200 shadow-lg border border-neutral-800">
+    <div className="w-64 rounded-xl bg-neutral-900/90 backdrop-blur-md p-4 text-sm text-neutral-200 shadow-lg border border-neutral-800">
       <div className="flex items-center justify-between mb-3">
         <h2 className="text-base font-bold text-white">DriveLive</h2>
         <div className={`w-2.5 h-2.5 rounded-full ${isConnected ? 'bg-green-400 shadow-[0_0_6px_#4f4]' : 'bg-red-500 shadow-[0_0_6px_#f44]'}`} />
@@ -37,6 +48,12 @@ export default function GpsInfoPanel({ position, speed, isConnected }: Props) {
 
       {position && (
         <>
+          <div className="flex items-baseline justify-between mb-2">
+            <span className="text-[10px] uppercase tracking-wide text-neutral-500">Accuracy</span>
+            <span className={`text-xl font-bold tabular-nums ${accuracyColor(accuracyM)}`}>
+              {formatAccuracy(accuracyM)}
+            </span>
+          </div>
           <div className="font-mono text-xs text-neutral-400 mb-2">
             {position.lat.toFixed(8)}, {position.lon.toFixed(8)}
           </div>

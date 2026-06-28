@@ -13,6 +13,29 @@ export function haversineMeters(a: LatLng, b: LatLng): number {
   return R * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
 }
 
+// Estimated horizontal position accuracy (1-sigma, in metres) from the fix
+// quality and HDOP. The receiver doesn't report a raw error figure, so we model
+// it: each fix type has a nominal CEP that we scale by HDOP (satellite geometry
+// / signal strength). RTK Fixed ≈ 1-2 cm, Float ≈ decimetres, DGPS/GPS metres.
+// Returns null when there's no usable fix.
+export function estimateAccuracyM(fixCode: number, hdop: number): number | null {
+  const h = hdop > 0 ? hdop : 1;
+  switch (fixCode) {
+    case 4: return 0.01 + 0.008 * h;  // RTK Fixed
+    case 5: return 0.20 + 0.25 * h;   // RTK Float
+    case 2: return 0.40 + 0.50 * h;   // DGPS
+    case 1: return 1.50 + 2.00 * h;   // standalone GPS
+    default: return null;             // no fix
+  }
+}
+
+// Human-friendly accuracy: "±1.6 cm" under a metre, "±2.7 m" above.
+export function formatAccuracy(meters: number | null): string {
+  if (meters === null) return '--';
+  if (meters < 1) return `±${Math.round(meters * 100)} cm`;
+  return `±${meters.toFixed(1)} m`;
+}
+
 export function bearing(a: LatLng, b: LatLng): number {
   const dLng = toRad(b.lng - a.lng);
   const lat1 = toRad(a.lat);
@@ -96,7 +119,33 @@ export function smoothRouteTurns(points: LatLng[], maxCornerCutM = 3.5, iteratio
   }
 
   const sampleCount = Math.max(smoothed.length, Math.ceil(lineLengthMeters(smoothed) / 0.6));
-  return resampleLine(smoothed, sampleCount);
+  return polishCurve(resampleLine(smoothed, sampleCount), POLISH_PASSES);
+}
+
+// Final polish: a handful of Laplacian (moving-average) passes over the
+// uniformly-resampled path with the endpoints pinned. Corner-cutting above
+// rounds the big turns, but short kinks/dents survive wherever pre-drawn lanes,
+// connectors, and stitch bridges meet at an angle (e.g. a connector joining a
+// lane through an intersection). This rounds those joints into smooth arcs. The
+// window is short (~2 m at 0.6 m spacing), so it erases joint kinks while
+// leaving the route's real shape intact — measured <0.5 m deviation, and it
+// does nothing on already-straight runs.
+const POLISH_PASSES = 12;
+function polishCurve(points: LatLng[], passes: number): LatLng[] {
+  if (points.length < 3) return points;
+  let out = points;
+  for (let p = 0; p < passes; p++) {
+    const next: LatLng[] = [out[0]];
+    for (let i = 1; i < out.length - 1; i++) {
+      next.push({
+        lat: out[i].lat * 0.5 + (out[i - 1].lat + out[i + 1].lat) * 0.25,
+        lng: out[i].lng * 0.5 + (out[i - 1].lng + out[i + 1].lng) * 0.25,
+      });
+    }
+    next.push(out[out.length - 1]);
+    out = next;
+  }
+  return out;
 }
 
 export function lineLengthMeters(points: LatLng[]): number {
@@ -300,8 +349,18 @@ export function offsetToRightLane(
   const maxOffset = opts.maxOffset ?? 6.0;       // never shove more than this far (m)
 
   // 1) desired right-offset (m) per point: width/4 where the point lies on a
-  //    lane center line, else 0 (connector / open road).
-  const raw = path.map((p) => {
+  //    lane center line, else 0 (connector / open road). The offset is also
+  //    forced to 0 through bends/junctions: a right offset is perpendicular to
+  //    travel, so on a turn it swings with the heading and throws the route into
+  //    an S across the intersection. Zeroing at corners (then easing in step 2)
+  //    keeps the line on the true center through the bend and ramps the lane
+  //    offset back in only on the straight runs.
+  const TURN_GATE_DEG = 22; // local turn beyond this = corner/junction: no offset
+  const raw = path.map((p, i) => {
+    if (i > 0 && i < path.length - 1) {
+      const turn = angleDeltaDeg(bearing(path[i - 1], p), bearing(p, path[i + 1]));
+      if (turn > TURN_GATE_DEG) return 0;
+    }
     let bestD = snapTol;
     let width = -1;
     for (const ln of laneLines) {
@@ -330,6 +389,121 @@ export function offsetToRightLane(
     const b = path[Math.min(path.length - 1, i + 1)];
     return offsetLatLng(p, off[i], bearing(a, b) + 90); // +90deg = right of travel
   });
+}
+
+// Replace each intersection connector in the route with a direct connection.
+//
+// The streets are drawn cleanly, but the little connector corridors stitched
+// between them are short, hand-drawn, and noisy — bisecting and welding them in
+// produces kinks/dents through intersections no amount of smoothing fully
+// removes. So instead of threading the route through the connector geometry, we
+// run each street straight to where it meets the connector, then connect
+// DIRECTLY to where the next street begins, and let smoothRouteTurns round that
+// corner into a turn (a strict straight join would clip the inside of the bend).
+//
+// Each route point is classified lane-vs-connector by which kind of center line
+// it sits on. A maximal connector run bounded by streets on both sides is
+// dropped, joining the two street ends directly — but only when that direct gap
+// is short enough to be an intersection (<= maxGapM). A long "connector" (really
+// a road mis-drawn as one) keeps its geometry so we don't cut across the world.
+export function straightenThroughConnectors(
+  path: LatLng[],
+  laneLines: { points: LatLng[] }[],
+  connLines: { points: LatLng[] }[],
+  maxGapM = 40
+): LatLng[] {
+  if (path.length < 3 || connLines.length === 0) return path;
+
+  const nearest = (p: LatLng, lines: { points: LatLng[] }[]): number => {
+    let best = Infinity;
+    for (const ln of lines) {
+      const c = closestPointOnPolyline(p, ln.points);
+      if (c && c.distance < best) best = c.distance;
+    }
+    return best;
+  };
+  // On a lane when it's at least as close to a lane line as to a connector line
+  // (small bias keeps welded junction points — on both — counted as lane).
+  const onLane = path.map((p) => nearest(p, laneLines) <= nearest(p, connLines) + 0.5);
+
+  const out: LatLng[] = [];
+  let i = 0;
+  while (i < path.length) {
+    if (onLane[i]) {
+      out.push(path[i]);
+      i++;
+      continue;
+    }
+    // a connector run [i, j)
+    let j = i;
+    while (j < path.length && !onLane[j]) j++;
+    const bounded = out.length > 0 && j < path.length; // street on both sides
+    const La = bounded ? out[out.length - 1] : null; // street A's end
+    const Lb = bounded ? path[j] : null; // street B's start
+    const gap = La && Lb ? haversineMeters(La, Lb) : Infinity;
+    if (bounded && gap <= maxGapM && La && Lb) {
+      // Drop the connector geometry. Rather than chord straight across (which
+      // clips both streets short), extend each street to the corner where they
+      // would meet and route La -> corner -> Lb, so the streets run straight to
+      // the junction and only the corner itself gets rounded by smoothing.
+      const aPrev = out.length >= 2 ? out[out.length - 2] : null;
+      const bNext = j + 1 < path.length ? path[j + 1] : null;
+      const corner = aPrev && bNext ? streetCorner(aPrev, La, Lb, bNext, gap) : null;
+      if (corner) out.push(corner);
+      // else: fall back to the direct chord (just join La -> Lb).
+    } else {
+      for (let k = i; k < j; k++) out.push(path[k]); // keep (long / unbounded)
+    }
+    i = j;
+  }
+  return out;
+}
+
+// The point where street A (heading aPrev->aEnd) and street B (heading
+// bStart->bNext) would intersect if extended — the natural turn corner of the
+// intersection. Returns null when the streets are near-parallel, the corner
+// falls behind either street, or it sits implausibly far out (an offset/odd
+// junction), so the caller can fall back to a straight join.
+function streetCorner(
+  aPrev: LatLng,
+  aEnd: LatLng,
+  bStart: LatLng,
+  bNext: LatLng,
+  chord: number
+): LatLng | null {
+  const ref = aEnd.lat;
+  const a0 = toLocalXY(aPrev, ref);
+  const a1 = toLocalXY(aEnd, ref);
+  const b0 = toLocalXY(bStart, ref);
+  const b1 = toLocalXY(bNext, ref);
+  const dax = a1.x - a0.x;
+  const day = a1.y - a0.y;
+  const dbx = b1.x - b0.x;
+  const dby = b1.y - b0.y;
+  const den = dax * -dby - day * -dbx;
+  if (Math.abs(den) < 1e-6) return null; // parallel
+  const t = ((b0.x - a1.x) * -dby - (b0.y - a1.y) * -dbx) / den;
+  const cx = a1.x + t * dax;
+  const cy = a1.y + t * day;
+  const corner = fromLocalXY({ x: cx, y: cy }, ref);
+  const eA = haversineMeters(corner, aEnd);
+  const eB = haversineMeters(corner, bStart);
+  // C must be ahead of street A (t>0), behind street B's entry (sB<0), a real
+  // extension (>1 m) and not overshoot far past the gap between the streets.
+  const sB = (cx - b0.x) * dbx + (cy - b0.y) * dby;
+  if (t > 0 && sB < 0 && eA > 1 && eB > 1 && eA <= 1.4 * chord && eB <= 1.4 * chord) {
+    // Ease the apex slightly back toward the straight join (the midpoint of the
+    // two street ends) so the rounded turn doesn't poke quite as far into the
+    // intersection — the full geometric corner sits a touch too deep.
+    const CORNER_PULLBACK = 0.2;
+    const midLat = (aEnd.lat + bStart.lat) / 2;
+    const midLng = (aEnd.lng + bStart.lng) / 2;
+    return {
+      lat: corner.lat * (1 - CORNER_PULLBACK) + midLat * CORNER_PULLBACK,
+      lng: corner.lng * (1 - CORNER_PULLBACK) + midLng * CORNER_PULLBACK,
+    };
+  }
+  return null;
 }
 
 export function totalPolylineLength(points: LatLng[]): number {

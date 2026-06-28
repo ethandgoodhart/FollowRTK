@@ -79,6 +79,12 @@ export interface GpsPosition {
   utc_time: string;
 }
 
+export interface NtripStatus {
+  provider: string;
+  label: string;
+  connected: boolean;
+}
+
 export interface RouteState {
   startPoint: LatLng | null;
   endPoint: LatLng | null;

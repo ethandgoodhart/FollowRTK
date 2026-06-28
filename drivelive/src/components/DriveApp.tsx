@@ -16,6 +16,7 @@ import RecoveryLayer from './RecoveryLayer';
 import TrajectoryLayer from './TrajectoryLayer';
 import RouteSelector from './RouteSelector';
 import GpsInfoPanel from './GpsInfoPanel';
+import NtripToggle from './NtripToggle';
 import RoutePanel from './RoutePanel';
 import DriveControl from './DriveControl';
 
@@ -25,6 +26,9 @@ interface Props {
 
 export default function DriveApp({ rawAnnotations }: Props) {
   const [map, setMap] = useState<mapboxgl.Map | null>(null);
+  // Curve smoothing: meters of corner rounded off at each turn. Tweakable live
+  // from the Route panel so you can dial turns from elbow-sharp to wide-and-smooth.
+  const [cornerCut, setCornerCut] = useState(3.5);
   const token = process.env.NEXT_PUBLIC_MAPBOX_TOKEN!;
   const wsUrl = process.env.NEXT_PUBLIC_GPS_WS_URL || 'ws://localhost:8765';
 
@@ -32,10 +36,10 @@ export default function DriveApp({ rawAnnotations }: Props) {
   // `live` editor. The snapped connector center-lines live only inside `graph`
   // for routing; drawing them yellow would double-draw every connector (raw
   // blue + distorted yellow) — that was the visual regression vs live.
-  const { laneBoundaries, connectorBoundaries, laneCenterLines, graph } = useAnnotations(rawAnnotations);
-  const { position, isConnected, getHistory, historyVersion, follow, sendCommand } = useGps(wsUrl);
+  const { laneBoundaries, connectorBoundaries, laneCenterLines, connCenterLines, graph } = useAnnotations(rawAnnotations);
+  const { position, isConnected, getHistory, historyVersion, follow, ntrip, sendCommand } = useGps(wsUrl);
   const { speedMph, speed } = useSpeed(getHistory, historyVersion);
-  const route = useRoute(graph, position, speed, laneCenterLines);
+  const route = useRoute(graph, position, speed, laneCenterLines, connCenterLines, cornerCut);
 
   // Panic stop: 'q' or Esc slams the brake to full immediately, anytime.
   // Ignored while typing in a field so it can't fire by accident.
@@ -78,8 +82,17 @@ export default function DriveApp({ rawAnnotations }: Props) {
         )}
       </MapView>
 
-      <GpsInfoPanel position={position} speed={speedMph} isConnected={isConnected} />
-      <RoutePanel route={route} onSelectEnd={route.selectEnd} onClear={route.clearRoute} />
+      <div className="absolute top-3 left-3 z-10 flex flex-col gap-2">
+        <NtripToggle ntrip={ntrip} onSwitch={(provider) => sendCommand({ type: 'ntrip', provider })} />
+        <GpsInfoPanel position={position} speed={speedMph} isConnected={isConnected} />
+      </div>
+      <RoutePanel
+        route={route}
+        onSelectEnd={route.selectEnd}
+        onClear={route.clearRoute}
+        cornerCut={cornerCut}
+        onCornerCutChange={setCornerCut}
+      />
       <DriveControl route={route} follow={follow} speedMph={speedMph} isConnected={isConnected} sendCommand={sendCommand} />
     </div>
   );

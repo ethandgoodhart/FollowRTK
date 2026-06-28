@@ -25,24 +25,76 @@ from typing import Optional
 
 from .gps import GpsReceiver
 
-NTRIP_HOST = "rtk.rtkdata.com"
-NTRIP_PORT = 2101
-MOUNTPOINT = "AUTO"
-USERNAME = "rtkethangoo41d"
-PASSWORD = "9ce1743e4074"
 FALLBACK_GGA = "$GPGGA,120000.00,3725.5900,N,12209.8400,W,1,12,0.8,30.0,M,-30.0,M,,*5E"
+
+# Selectable correction sources. The web UI can switch between these live; the
+# key is what the browser sends, ``label`` is what it shows.
+PROVIDERS = {
+    "pointone": {
+        "label": "Point One",
+        "host": "virtualrtk.pointonenav.com", "port": 2101, "mountpoint": "AUTO",
+        "username": "3hwzam8uyh", "password": "s5uury8gvs",
+    },
+    "rtkdata": {
+        "label": "RTKData",
+        "host": "rtk.rtkdata.com", "port": 2101, "mountpoint": "AUTO",
+        "username": "rtkethangoo41d", "password": "9ce1743e4074",
+    },
+}
+DEFAULT_PROVIDER = "pointone"
+
+# Back-compat module-level defaults (some callers/tests import these).
+NTRIP_HOST = PROVIDERS[DEFAULT_PROVIDER]["host"]
+NTRIP_PORT = PROVIDERS[DEFAULT_PROVIDER]["port"]
+MOUNTPOINT = PROVIDERS[DEFAULT_PROVIDER]["mountpoint"]
+USERNAME = PROVIDERS[DEFAULT_PROVIDER]["username"]
+PASSWORD = PROVIDERS[DEFAULT_PROVIDER]["password"]
 
 
 class NtripClient:
-    def __init__(self, gps: GpsReceiver, host: str = NTRIP_HOST, port: int = NTRIP_PORT,
-                 mountpoint: str = MOUNTPOINT, username: str = USERNAME,
-                 password: str = PASSWORD):
+    def __init__(self, gps: GpsReceiver, provider: str = DEFAULT_PROVIDER):
         self.gps = gps
-        self.host, self.port, self.mountpoint = host, port, mountpoint
-        self.username, self.password = username, password
         self._stop = threading.Event()
         self._thread: Optional[threading.Thread] = None
         self.connected = False
+        # Guards the active-provider config + current socket so switch() can
+        # change source and tear down the live connection from another thread.
+        self._cfg_lock = threading.Lock()
+        self._sock: Optional[socket.socket] = None
+        self._switch = threading.Event()
+        self.provider = provider
+        cfg = PROVIDERS.get(provider, PROVIDERS[DEFAULT_PROVIDER])
+        self.host, self.port, self.mountpoint = cfg["host"], cfg["port"], cfg["mountpoint"]
+        self.username, self.password = cfg["username"], cfg["password"]
+
+    def switch(self, provider: str) -> bool:
+        """Switch the active correction source live. Returns False for an unknown
+        provider or a no-op (already selected). Drops the current connection so
+        the run loop immediately reconnects to the new caster."""
+        if provider not in PROVIDERS or provider == self.provider:
+            return False
+        cfg = PROVIDERS[provider]
+        with self._cfg_lock:
+            self.provider = provider
+            self.host, self.port, self.mountpoint = cfg["host"], cfg["port"], cfg["mountpoint"]
+            self.username, self.password = cfg["username"], cfg["password"]
+            self.connected = False
+            self._switch.set()
+            if self._sock is not None:
+                try:
+                    self._sock.close()   # break the recv loop so we reconnect now
+                except Exception:
+                    pass
+        return True
+
+    def status(self) -> dict:
+        """Snapshot for the UI: which source is active and whether it's flowing."""
+        with self._cfg_lock:
+            return {
+                "provider": self.provider,
+                "label": PROVIDERS.get(self.provider, {}).get("label", self.provider),
+                "connected": self.connected,
+            }
 
     def start(self) -> "NtripClient":
         self._stop.clear()
@@ -58,17 +110,39 @@ class NtripClient:
     def _gga(self) -> str:
         return self.gps.last_gga_raw or FALLBACK_GGA
 
+    def _wait_for_real_gga(self, timeout: float = 5.0) -> None:
+        """Give the receiver a moment to emit a real GGA before we connect, so
+        VRS casters build the virtual base at our true position (not FALLBACK)."""
+        deadline = time.time() + timeout
+        while time.time() < deadline and not self.gps.last_gga_raw:
+            if self._stop.is_set():
+                return
+            time.sleep(0.1)
+
     def _run(self) -> None:
+        # How often we echo our position back to the caster. VRS/AUTO mountpoints
+        # only START streaming once they have our GGA, and keep streaming the
+        # right virtual base as we move, so send it briskly — once a second.
+        GGA_INTERVAL = 1.0
         while not self._stop.is_set():
             sock = None
             try:
+                self._wait_for_real_gga()
+                # Snapshot the active provider for this connection. switch() may
+                # change these mid-stream; we pick the new ones on reconnect.
+                self._switch.clear()
+                with self._cfg_lock:
+                    host, port, mountpoint = self.host, self.port, self.mountpoint
+                    username, password = self.username, self.password
                 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 sock.settimeout(10)
-                sock.connect((self.host, self.port))
-                creds = base64.b64encode(f"{self.username}:{self.password}".encode()).decode()
+                sock.connect((host, port))
+                with self._cfg_lock:
+                    self._sock = sock
+                creds = base64.b64encode(f"{username}:{password}".encode()).decode()
                 req = (
-                    f"GET /{self.mountpoint} HTTP/1.1\r\n"
-                    f"Host: {self.host}\r\n"
+                    f"GET /{mountpoint} HTTP/1.1\r\n"
+                    f"Host: {host}\r\n"
                     f"Ntrip-Version: Ntrip/2.0\r\n"
                     f"User-Agent: NTRIP cartlib/1.0\r\n"
                     f"Authorization: Basic {creds}\r\n"
@@ -92,26 +166,38 @@ class NtripClient:
                 if remainder and self.gps._ser:
                     self.gps._ser.write(remainder)
 
-                sock.settimeout(5)
+                # Short recv timeout so a silent stream still lets us re-send GGA
+                # on schedule — the caster won't start streaming until it does.
+                sock.settimeout(1)
                 last_gga = time.time()
-                while not self._stop.is_set():
+                while not self._stop.is_set() and not self._switch.is_set():
+                    if time.time() - last_gga >= GGA_INTERVAL:
+                        last_gga = time.time()
+                        try:
+                            sock.sendall((self._gga() + "\r\n").encode())
+                        except OSError:
+                            break
                     try:
                         data = sock.recv(4096)
                         if not data:
                             break
                         if self.gps._ser:
                             self.gps._ser.write(data)
-                        if time.time() - last_gga > 10:
-                            last_gga = time.time()
-                            sock.sendall((self._gga() + "\r\n").encode())
                     except socket.timeout:
                         continue
+                    except OSError:
+                        break   # socket closed by switch()
             except Exception:
                 self.connected = False
             finally:
+                with self._cfg_lock:
+                    self._sock = None
                 if sock:
                     try:
                         sock.close()
                     except Exception:
                         pass
-            time.sleep(3)
+            # A live switch reconnects immediately; otherwise back off briefly so
+            # we don't hammer a flaky caster on repeated drops.
+            if not self._switch.is_set():
+                time.sleep(3)

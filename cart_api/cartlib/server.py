@@ -56,6 +56,7 @@ _DRIVE_LOG = os.path.join(os.path.dirname(os.path.dirname(__file__)), "last_driv
 _loop: asyncio.AbstractEventLoop | None = None
 _clients: set = set()
 _cart: Cart | None = None
+_ntrip = None  # NtripClient when corrections are running; lets the UI switch source
 _default_max_speed = 0.12
 _default_max_speed_mph = 4.0
 
@@ -90,10 +91,28 @@ def _to_web(fix: dict) -> dict:
 
 
 # --- broadcasting -----------------------------------------------------------
+async def _send_to_client(c, msg: str) -> None:
+    """Send to one client, but never let a slow/stuck one stall the broadcast.
+    A backgrounded or laggy browser tab fills its TCP send buffer; an unbounded
+    ``await c.send()`` would then block the GPS pump for EVERY client, freezing
+    the whole map feed after ~a minute. So we cap each send and drop clients that
+    can't keep up — the UI auto-reconnects, so the feed self-heals."""
+    try:
+        await asyncio.wait_for(c.send(msg), timeout=1.0)
+    except Exception:
+        _clients.discard(c)
+        try:
+            await c.close()
+        except Exception:
+            pass
+
+
 async def _broadcast(obj: dict) -> None:
     if _clients:
         msg = json.dumps(obj)
-        await asyncio.gather(*[c.send(msg) for c in _clients], return_exceptions=True)
+        # Iterate a snapshot: _send_to_client may discard from _clients.
+        await asyncio.gather(*[_send_to_client(c, msg) for c in list(_clients)],
+                             return_exceptions=True)
 
 
 def _broadcast_threadsafe(obj: dict) -> None:
@@ -305,6 +324,8 @@ async def _ws_handler(ws):
     try:
         if _cart and _cart.gps and _cart.gps.latest:
             await ws.send(json.dumps({"type": "position", "data": _to_web(_cart.gps.latest)}))
+        if _ntrip is not None:
+            await ws.send(json.dumps({"type": "ntrip", "data": _ntrip.status()}))
         async for raw in ws:
             try:
                 msg = json.loads(raw)
@@ -328,6 +349,11 @@ async def _ws_handler(ws):
                 await ws.send(json.dumps({"type": "drive_ack",
                                           "data": {"ok": True, "stopped": True,
                                                    "emergency": emergency}}))
+            elif t == "ntrip":
+                # Switch the live correction source; tell everyone the new state.
+                if _ntrip is not None:
+                    _ntrip.switch(msg.get("provider", ""))
+                    await _broadcast({"type": "ntrip", "data": _ntrip.status()})
     except websockets.exceptions.ConnectionClosed:
         pass
     finally:
@@ -336,11 +362,21 @@ async def _ws_handler(ws):
 
 async def _gps_pump() -> None:
     last_ts = None
+    last_ntrip = None
+    last_ntrip_t = 0.0
     while True:
         fix = _cart.gps.latest if (_cart and _cart.gps) else None
         if fix and fix.get("ts") != last_ts:
             last_ts = fix["ts"]
             await _broadcast({"type": "position", "data": _to_web(fix)})
+        # Push NTRIP source/connection status ~1 Hz (and immediately on change)
+        # so the UI toggle reflects whether the chosen caster is actually flowing.
+        if _ntrip is not None:
+            now = _loop.time() if _loop else 0.0
+            status = _ntrip.status()
+            if status != last_ntrip or now - last_ntrip_t >= 1.0:
+                last_ntrip, last_ntrip_t = status, now
+                await _broadcast({"type": "ntrip", "data": status})
         await asyncio.sleep(0.01)
 
 
@@ -394,7 +430,7 @@ def _handle_remote_command(cmd: str, data: dict) -> dict:
 
 
 async def _main_async(args) -> None:
-    global _loop, _cart, _default_max_speed, _default_max_speed_mph
+    global _loop, _cart, _ntrip, _default_max_speed, _default_max_speed_mph
     _loop = asyncio.get_running_loop()
     _default_max_speed = args.max_speed
     _default_max_speed_mph = max(1.0, min(config.mph_from_gas(args.max_speed), MAX_UI_SPEED_MPH))
@@ -410,12 +446,16 @@ async def _main_async(args) -> None:
     if args.ntrip and _cart.gps:
         from .ntrip import NtripClient
         ntrip = NtripClient(_cart.gps).start()
-        print("[server] NTRIP corrections started")
+        _ntrip = ntrip
+        print(f"[server] NTRIP corrections started (source: {ntrip.status()['label']})")
 
     print(f"[server] WebSocket bridge on ws://localhost:{WS_PORT}")
     print("[server] open the drivelive UI, click Set Start/End, then Drive Route.")
     try:
-        async with websockets.serve(_ws_handler, "", WS_PORT):
+        # ping_interval keeps dead peers detectable; a generous ping_timeout
+        # avoids dropping a healthy-but-briefly-busy browser tab.
+        async with websockets.serve(_ws_handler, "", WS_PORT,
+                                    ping_interval=20, ping_timeout=60):
             await _gps_pump()
     finally:
         # Process shutdown should release throttle and disarm cleanly. Do not
