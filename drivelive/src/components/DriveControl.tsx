@@ -9,6 +9,8 @@ interface Props {
   speedMph: number;
   isConnected: boolean;
   sendCommand: (obj: object) => boolean;
+  lockRoute: boolean;
+  onToggleLockRoute: (value: boolean) => void;
 }
 
 const PHASE_COLOR: Record<string, string> = {
@@ -18,14 +20,14 @@ const PHASE_COLOR: Record<string, string> = {
   abort: 'text-red-400',
 };
 
-const DEFAULT_MAX_SPEED_MPH = 3;
+const DEFAULT_MAX_SPEED_MPH = 3.5;
 const MAX_SPEED_MPH = 20;
 
-export default function DriveControl({ route, follow, speedMph, isConnected, sendCommand }: Props) {
+export default function DriveControl({ route, follow, speedMph, isConnected, sendCommand, lockRoute, onToggleLockRoute }: Props) {
   const [maxSpeedMph, setMaxSpeedMph] = useState(DEFAULT_MAX_SPEED_MPH);
   const [tuning, setTuning] = useState({
-    lookahead_m: 2.0,
-    steer_gain: 1.3,
+    lookahead_m: 3.0,
+    steer_gain: 5.4,
     xtrack_gain: 1.5,
     heading_gain: 3.0,
     max_steer_deg: 320,
@@ -100,6 +102,22 @@ export default function DriveControl({ route, follow, speedMph, isConnected, sen
         <TuneSlider label="max steer" description="hard cap on how far the wheel can turn — above ~110° it carves too tight to recover from and tends to overshoot" suffix="deg" value={tuning.max_steer_deg} min={10} max={320} step={1} digits={0} onChange={(v) => updateTune('max_steer_deg', v)} />
         <TuneSlider label="turn slow" description="how much it eases off the gas through turns — 0 = hold speed" value={tuning.turn_slowdown} min={0} max={4} step={0.1} digits={1} onChange={(v) => updateTune('turn_slowdown', v)} />
       </div>
+
+      <button
+        type="button"
+        role="switch"
+        aria-checked={lockRoute}
+        onClick={() => onToggleLockRoute(!lockRoute)}
+        className="mb-3 flex w-full items-center justify-between rounded-lg border border-neutral-800 bg-neutral-950/60 px-3 py-2 text-left"
+      >
+        <span className="text-sm text-neutral-100">
+          Lock route while driving{' '}
+          <span className="text-neutral-300">(freeze the purple line until Stop)</span>
+        </span>
+        <span className={`relative ml-3 h-5 w-9 shrink-0 rounded-full transition-colors ${lockRoute ? 'bg-purple-600' : 'bg-neutral-700'}`}>
+          <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-all ${lockRoute ? 'left-[18px]' : 'left-0.5'}`} />
+        </span>
+      </button>
 
       <div className="flex flex-col gap-2 mb-3">
         <button

@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import mapboxgl from 'mapbox-gl';
-import { RawAnnotations } from '@/lib/types';
+import { RawAnnotations, LatLng } from '@/lib/types';
 import { courseOverGround } from '@/lib/geo';
 import { useAnnotations } from '@/hooks/useAnnotations';
 import { useGps } from '@/hooks/useGps';
@@ -41,6 +41,19 @@ export default function DriveApp({ rawAnnotations }: Props) {
   const { speedMph, speed } = useSpeed(getHistory, historyVersion);
   const route = useRoute(graph, position, speed, laneCenterLines, connCenterLines, cornerCut);
 
+  // Lock-route toggle: when on, the purple line is frozen the moment a drive
+  // starts and held until Stop, so the displayed route matches the fixed path
+  // the cart was actually given (instead of re-planning under it every fix).
+  const [lockRoute, setLockRoute] = useState(true);
+  const [frozenPath, setFrozenPath] = useState<LatLng[] | null>(null);
+  const driving = follow?.active ?? false;
+  useEffect(() => {
+    // Snapshot once when (locked & driving) begins; clear when either drops.
+    if (lockRoute && driving) setFrozenPath((prev) => prev ?? route.path);
+    else setFrozenPath(null);
+  }, [lockRoute, driving, route.path]);
+  const displayPath = lockRoute && driving && frozenPath ? frozenPath : route.path;
+
   // Panic stop: 'q' or Esc slams the brake to full immediately, anytime.
   // Ignored while typing in a field so it can't fire by accident.
   useEffect(() => {
@@ -68,8 +81,8 @@ export default function DriveApp({ rawAnnotations }: Props) {
           <>
             <AnnotationLayers map={map} lanes={laneBoundaries} connectors={connectorBoundaries} centerLines={laneCenterLines} />
             <GpsMarker map={map} position={position} heading={follow?.active ? follow.heading_deg : null} />
-            <RouteLayer map={map} path={route.path} startPoint={route.startPoint} endPoint={route.endPoint} />
-            <RecoveryLayer map={map} position={position} path={route.path} heading={heading} />
+            <RouteLayer map={map} path={displayPath} startPoint={route.startPoint} endPoint={route.endPoint} />
+            <RecoveryLayer map={map} position={position} path={displayPath} heading={heading} />
             <TrajectoryLayer
               map={map}
               position={position}
@@ -93,7 +106,7 @@ export default function DriveApp({ rawAnnotations }: Props) {
         cornerCut={cornerCut}
         onCornerCutChange={setCornerCut}
       />
-      <DriveControl route={route} follow={follow} speedMph={speedMph} isConnected={isConnected} sendCommand={sendCommand} />
+      <DriveControl route={route} follow={follow} speedMph={speedMph} isConnected={isConnected} sendCommand={sendCommand} lockRoute={lockRoute} onToggleLockRoute={setLockRoute} />
     </div>
   );
 }
