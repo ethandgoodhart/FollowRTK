@@ -94,6 +94,42 @@ STEERING_TRAP_VEL = 4.0     # turns/s
 STEERING_TRAP_ACCEL = 8.0   # turns/s^2
 STEERING_TRAP_DECEL = 8.0   # turns/s^2
 
+# --------------------------------------------------------------------------
+# ODrive S1 runtime control tuning (applied in SteeringController.enable()).
+#
+# INPUT_MODE selects how streamed position setpoints are handled:
+#   5 = TRAP_TRAJ    (re-plans a trapezoid to each target; the proven default)
+#   3 = POS_FILTER   (2nd-order filter toward each target — smoother for a
+#                     controller that streams a fresh position every ~0.1 s)
+#   1 = PASSTHROUGH  (raw; the follower's own command shaping does the easing)
+# The follow controller streams a smooth, slew-limited target at ~10 Hz, so
+# POS_FILTER with a few-Hz bandwidth tracks it tightly without the per-setpoint
+# re-plan jerk trap-traj can add. Left at TRAP_TRAJ by default (matches the
+# behaviour the recorded drives were tuned against); flip to POS_FILTER to try
+# the smoother streaming mode.
+STEERING_INPUT_MODE = 5              # 5=TRAP_TRAJ (default), 3=POS_FILTER, 1=PASSTHROUGH
+STEERING_INPUT_FILTER_BW = 6.0      # Hz, only used when INPUT_MODE = POS_FILTER
+
+# Position-loop gains. None = leave the ODrive's configured value untouched
+# (recommended unless you know the tune). Populate to stiffen/soften the loop.
+STEERING_POS_GAIN = None            # (turns/s)/turn
+STEERING_VEL_GAIN = None            # (Nm/(turns/s))
+STEERING_VEL_INTEGRATOR_GAIN = None
+
+# --------------------------------------------------------------------------
+# Vehicle geometry (2006 Club Car Precedent) — used by the path follower's
+# kinematic feedforward + heading estimator. Calibrated so the modelled turn
+# radius and steering ratio match the recorded RTK drives.
+# --------------------------------------------------------------------------
+WHEELBASE_M = 1.65          # front-to-rear axle (~65 in)
+STEER_RATIO = 10.0          # steering-column deg per road-wheel deg
+MAX_ROADWHEEL_DEG = 33.0    # rack limit at the road wheel (min radius ~2.5 m)
+
+
+def column_to_roadwheel_deg(column_deg: float) -> float:
+    """Steering-column angle -> road-wheel angle (deg), clamped to the rack."""
+    return max(-MAX_ROADWHEEL_DEG, min(column_deg / STEER_RATIO, MAX_ROADWHEEL_DEG))
+
 
 def steering_deg_to_motor_turns(column_deg: float) -> float:
     """Steering-column angle (deg) -> motor turns."""

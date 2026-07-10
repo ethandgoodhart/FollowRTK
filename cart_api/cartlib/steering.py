@@ -45,6 +45,8 @@ from . import config
 AXIS_STATE_IDLE = 1
 AXIS_STATE_CLOSED_LOOP = 8
 CONTROL_MODE_POSITION = 3
+INPUT_MODE_PASSTHROUGH = 1
+INPUT_MODE_POS_FILTER = 3
 INPUT_MODE_TRAP_TRAJ = 5
 
 
@@ -100,8 +102,13 @@ class SteeringController:
             self._ser.flush()
             if not read_reply:
                 return ""
-            time.sleep(0.05)
-            return self._ser.read(256).decode("ascii", "ignore").strip()
+            # ODrive ASCII replies are a single newline-terminated line. Read up
+            # to the newline instead of a fixed 256-byte block: read(256) always
+            # blocked for the FULL serial timeout (~0.4 s) because the ~10-byte
+            # reply never filled the buffer, which pinned the whole control loop
+            # to ~2 Hz. read_until returns the instant the '\n' arrives, so the
+            # loop can run at 10-15 Hz — the single biggest smoothness win.
+            return self._ser.read_until(b"\n").decode("ascii", "ignore").strip()
 
     def _read_float(self, prop: str) -> Optional[float]:
         reply = self._query(f"r {prop}")
@@ -149,14 +156,29 @@ class SteeringController:
         self._query("sc", read_reply=False)
 
     def enable(self) -> bool:
-        """Enter closed-loop position control with gentle trap-traj limits."""
+        """Enter closed-loop position control with the configured input mode."""
         self.clear_errors()
-        # Position control via trapezoidal trajectory for smooth motion.
         self._write("axis0.controller.config.control_mode", CONTROL_MODE_POSITION)
-        self._write("axis0.controller.config.input_mode", INPUT_MODE_TRAP_TRAJ)
-        self._write("axis0.trap_traj.config.vel_limit", config.STEERING_TRAP_VEL)
-        self._write("axis0.trap_traj.config.accel_limit", config.STEERING_TRAP_ACCEL)
-        self._write("axis0.trap_traj.config.decel_limit", config.STEERING_TRAP_DECEL)
+        # Input mode: TRAP_TRAJ (default), POS_FILTER, or PASSTHROUGH — see
+        # config.STEERING_INPUT_MODE. The follower streams a smooth, slew-limited
+        # target at ~10 Hz; POS_FILTER tracks that continuously, TRAP_TRAJ replans
+        # per setpoint (the historical default).
+        self._write("axis0.controller.config.input_mode", config.STEERING_INPUT_MODE)
+        if config.STEERING_INPUT_MODE == INPUT_MODE_TRAP_TRAJ:
+            self._write("axis0.trap_traj.config.vel_limit", config.STEERING_TRAP_VEL)
+            self._write("axis0.trap_traj.config.accel_limit", config.STEERING_TRAP_ACCEL)
+            self._write("axis0.trap_traj.config.decel_limit", config.STEERING_TRAP_DECEL)
+        elif config.STEERING_INPUT_MODE == INPUT_MODE_POS_FILTER:
+            self._write("axis0.controller.config.input_filter_bandwidth",
+                        config.STEERING_INPUT_FILTER_BW)
+        # Optional position-loop gains (leave untouched when None).
+        if config.STEERING_POS_GAIN is not None:
+            self._write("axis0.controller.config.pos_gain", config.STEERING_POS_GAIN)
+        if config.STEERING_VEL_GAIN is not None:
+            self._write("axis0.controller.config.vel_gain", config.STEERING_VEL_GAIN)
+        if config.STEERING_VEL_INTEGRATOR_GAIN is not None:
+            self._write("axis0.controller.config.vel_integrator_gain",
+                        config.STEERING_VEL_INTEGRATOR_GAIN)
         # Hold current position so enabling doesn't jerk the wheel.
         self._write("axis0.controller.input_pos", self.position_turns())
         self._write("axis0.requested_state", AXIS_STATE_CLOSED_LOOP)

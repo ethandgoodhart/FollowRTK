@@ -75,15 +75,39 @@ class FollowConfig:
     speed_i_max: float = 35.0         # clamp on the error integral (mph*s)
     brake_kp: float = 0.08            # brake pot per mph of overspeed
     brake_deadband_mph: float = 0.5   # tolerate this much overspeed before braking
-    steer_gain: float = 1.3           # deg steering per deg cross-track correction
-    xtrack_gain: float = 1.5          # multiplier on signed cross-track error
-    heading_gain: float = 3.0         # D-gain: deg steer per deg of (cross-rate)
-                                      # heading error — the damping that stops the
-                                      # weave/overshoot. See step()'s heading_err.
-    heading_min_speed_mph: float = 0.5  # below this, heading estimate is unreliable
-    steer_sign: float = 1.0           # hardware steering sign convention
+    # --- LEGACY steering knobs (kept so the server/UI still construct a config;
+    #     the smooth Stanley law below uses the `st_*` params, not these). ---
+    steer_gain: float = 5.4           # (legacy) old PD proportional gain
+    xtrack_gain: float = 1.5          # (legacy) old cross-track multiplier
+    heading_gain: float = 3.0         # (legacy) old cross-rate damping gain
+    heading_min_speed_mph: float = 0.5
+    steer_sign: float = 1.0           # hardware steering sign convention (+1 = right)
     max_steer_deg: float = 320.0      # clamp on commanded column angle
     turn_slowdown: float = 0.0        # gas *= 1/(1+turn_slowdown*|steer|/max_steer)
+
+    # --- SMOOTH steering law (Stanley + curvature feedforward + fused heading).
+    #     Tuned in the off-vehicle simulator (cart_api/sim) against all three
+    #     recorded RTK drives: ~4-10x lower steering rate, tighter tracking, no
+    #     full-lock sawing, stable at 5.5 mph. See sim/controllers.py::NewController.
+    st_k_cross: float = 0.40          # Stanley cross-track gain in atan(k*e/(v+soft))
+    st_cross_soft_mps: float = 0.9    # softening speed so low speed doesn't saturate
+    st_k_heading: float = 1.2         # heading-alignment weight (damping to the line)
+    st_max_cross_road_deg: float = 24.0   # clamp the cross term's road-angle demand
+    st_k_int: float = 0.10            # integral trim: road-wheel deg per (m*s)
+    st_int_max_deg: float = 5.0
+    st_int_enable_cross_m: float = 1.0
+    st_gps_lookback_m: float = 0.9    # travel window for the absolute GPS heading
+    st_gps_correct_gain: float = 0.4  # 1/s pull of fused heading toward GPS heading.
+                                      # Deliberately low: the wheel-angle yaw model
+                                      # is lag-free while the backward-looking GPS
+                                      # track lags ~0.3 s, so a slow crossover
+                                      # (~0.06 Hz) keeps the heading (hence the
+                                      # damping term) in phase. A high gain dragged
+                                      # the heading a quarter-cycle late and the
+                                      # cart weaved across the line.
+    st_min_track_speed_mph: float = 0.9
+    st_tau_cmd_s: float = 0.25        # low-pass time constant on the column target
+    st_slew_deg_s: float = 320.0      # controller-side slew clamp (<= actuator limit)
     goal_radius_m: float = 1.5        # within this of last point => arrived
     # Final-approach deceleration: ease the speed setpoint down to a crawl over
     # arrival_slowdown_m so we glide to the goal instead of cruising flat-out
@@ -94,7 +118,8 @@ class FollowConfig:
     max_crosstrack_m: float = 6.0     # abort if we stray this far off path
     gps_max_age_s: float = 2.5        # stop if fix older than this
     require_rtk: bool = False         # require RTK Fixed/Float to drive
-    rate_hz: float = 15.0
+    rate_hz: float = 12.0             # control loop rate (serial read fix lets us
+                                      # actually hit this now — was ~2 Hz stalled)
 
 
 @dataclass
@@ -114,14 +139,18 @@ class PathFollower:
         self.state = FollowState()
         self._last_steer_read_ts = 0.0
         self._last_actual_steer_deg: Optional[float] = None
-        # cross-track derivative state (heading-free damping)
-        self._prev_cross: Optional[float] = None
-        self._prev_cross_ts: Optional[float] = None
-        self._heading_ewma: Optional[float] = None   # smoothed wheel angle (needle)
-        self._herr_ewma: Optional[float] = None       # smoothed cross-rate heading err
         # closed-loop speed control state
         self._speed_integral: float = 0.0
         self._prev_speed_ts: Optional[float] = None
+        # --- smooth steering law state ---
+        self._origin = self.path[0]        # local-frame origin for the heading est
+        self._st_integral: float = 0.0     # road-wheel deg trim
+        self._st_cmd: float = 0.0          # filtered column target
+        self._fused_heading: Optional[float] = None   # deg, absolute compass (0=N)
+        self._hist: list = []              # [(cum_s, x, y)] recent track
+        self._cum_s: float = 0.0
+        self._last_xy: Optional[tuple] = None
+        self._prev_step_ts: Optional[float] = None
 
     # -- helpers -----------------------------------------------------------
     def _apply(self, gas: float, brake: float, steer_deg: Optional[float]) -> None:
@@ -141,36 +170,68 @@ class PathFollower:
             self.cart.pedals.set_gas(0.0)
             self.cart.pedals.set_brake(brake)
 
-    def _cross_rate(self, cross: float, now: float) -> float:
-        """d(signed cross-track)/dt — the heading-free damping signal."""
-        rate = 0.0
-        if self._prev_cross is not None and self._prev_cross_ts is not None:
-            dt = now - self._prev_cross_ts
-            if dt > 1e-3:
-                rate = (cross - self._prev_cross) / dt
-        self._prev_cross = cross
-        self._prev_cross_ts = now
-        return rate
+    def _path_curvature(self, along_m: float, w: float = 2.5) -> float:
+        """Signed path curvature (1/m) at arc-length ``along_m``.
 
-    def _smooth_heading(self, wheel_deg: float) -> float:
-        """Light EWMA on the measured wheel angle — just knocks off encoder
-        quantization while still tracking the current angle almost exactly (the
-        map needle leans on this 1:1). Render-side easing handles the rest."""
-        if self._heading_ewma is None:
-            self._heading_ewma = wheel_deg
-        else:
-            self._heading_ewma = 0.4 * self._heading_ewma + 0.6 * wheel_deg
-        return self._heading_ewma
+        +curvature = path bending to the RIGHT (bearing increasing clockwise),
+        which is the sign the road-wheel feedforward needs (positive column =
+        right turn). Estimated from the bearing change over a ±w window so a
+        single noisy vertex can't spike it.
+        """
+        a, _ = geo.point_at_distance(self.path, max(0.0, along_m - w))
+        b, _ = geo.point_at_distance(self.path, along_m)
+        c, _ = geo.point_at_distance(self.path, along_m + w)
+        if a == b or b == c:
+            return 0.0
+        h1 = geo.bearing_deg(a, b)
+        h2 = geo.bearing_deg(b, c)
+        dh = geo.angle_diff_deg(h2, h1)   # signed, wrapped to (-180, 180]
+        return math.radians(dh) / (2.0 * w)
 
-    def _smooth_heading_err(self, herr_deg: float) -> float:
-        """Heavier EWMA on the cross-rate heading estimate — the numerical
-        derivative of position is noisy, so this is the main thing keeping the
-        damping term from chattering. Trades a little lag for a lot of calm."""
-        if self._herr_ewma is None:
-            self._herr_ewma = herr_deg
-        else:
-            self._herr_ewma = 0.6 * self._herr_ewma + 0.4 * herr_deg
-        return self._herr_ewma
+    def _update_fused_heading(self, pos, v_ms: float, wheel_deg: float,
+                              dt: float) -> Optional[float]:
+        """Absolute cart heading (deg, compass) via a complementary filter:
+        high-frequency wheel-angle yaw integration + low-frequency GPS track.
+
+        The wheel-angle model is clean and lag-free; the GPS track over a short
+        travel window is absolute and drift-free. Fusing them gives a smooth,
+        trustworthy heading at any speed — the thing the old law never had, so it
+        had to damp on a raw differentiated cross-track and limit-cycled.
+        """
+        c = self.cfg
+        x, y = geo.local_xy(self._origin, pos)
+        if self._last_xy is not None:
+            self._cum_s += math.hypot(x - self._last_xy[0], y - self._last_xy[1])
+        self._last_xy = (x, y)
+        self._hist.append((self._cum_s, x, y))
+        while len(self._hist) > 2 and self._cum_s - self._hist[0][0] > 3 * c.st_gps_lookback_m:
+            self._hist.pop(0)
+
+        gps_heading = None
+        if v_ms > c.st_min_track_speed_mph * 0.44704:
+            for s0, hx, hy in self._hist:
+                if self._cum_s - s0 >= c.st_gps_lookback_m:
+                    dx, dy = x - hx, y - hy
+                    if math.hypot(dx, dy) > 0.3:
+                        # bearing of travel: 0 = north, + = clockwise (east)
+                        gps_heading = math.degrees(math.atan2(dx, dy)) % 360.0
+                    break
+
+        if self._fused_heading is None:
+            self._fused_heading = gps_heading  # may stay None until we've moved
+            return self._fused_heading
+
+        # predict with the wheel-angle yaw-rate model (responsive, lag-free)
+        road = math.radians(config.column_to_roadwheel_deg(wheel_deg))
+        yaw_rate_deg = math.degrees(v_ms / config.WHEELBASE_M * math.tan(road))
+        self._fused_heading = (self._fused_heading + yaw_rate_deg * dt) % 360.0
+        # correct toward the absolute GPS heading (low frequency, no drift)
+        if gps_heading is not None:
+            k = min(1.0, c.st_gps_correct_gain * dt)
+            self._fused_heading = (
+                self._fused_heading
+                + k * geo.angle_diff_deg(gps_heading, self._fused_heading)) % 360.0
+        return self._fused_heading
 
     # -- one control step --------------------------------------------------
     def step(self) -> dict:
@@ -203,7 +264,7 @@ class PathFollower:
             self._stop("arrived at goal", brake=c.arrival_brake)
             return self._telemetry(fix, None, 0.0, brake=c.arrival_brake)
 
-        # --- heading-free cross-track tracking ---
+        # --- smooth path tracking (Stanley + curvature FF + fused heading) ---
         self.state.phase = "tracking"
         snap = geo.nearest_point_on_path(self.path, pos)
 
@@ -223,55 +284,59 @@ class PathFollower:
         b = self.path[min(seg_i + 1, len(self.path) - 1)]
         path_bearing = geo.bearing_deg(a, b)
 
-        # Cart heading from the WHEELS, not GPS (per the operator's spec). We take
-        # the measured steering angle — the same value shown as the panel's
-        # "actual" — and convert it to an equivalent heading offset from the path.
-        # This ONE quantity is the single source of truth: it feeds the steering
-        # align term below AND the map needle, so the two can never disagree.
-        # The needle shows this angle 1:1 (almost exactly the wheel angle); the
-        # steering term uses a scaled-down copy so its feel/tuning is unchanged.
-        # Works at any speed, unlike the old GPS estimate that was meaningless
-        # below walking pace.
-        # wheel_deg is kept only for the MAP NEEDLE (heading_abs below): the
-        # needle leans by the measured wheel angle 1:1. It is NOT used for the
-        # steering law any more — see the heading_err below.
-        wheel_deg = self._smooth_heading(self._last_actual_steer_deg or 0.0)
-
-        # Heading error, heading-FREE, from the cross-track RATE. Since
-        # d(cross)/dt = v * sin(heading_err), we recover heading_err ≈
-        # asin(cross_rate / v) from position + speed alone — no compass, works
-        # the same whether the wheel is slewing or settled. (+ heading_err =
-        # cart pointing LEFT of the path.) This is the damping term the law was
-        # always meant to have (module docstring: "PD on (cross, cross_rate)");
-        # the old wheel-angle "align" term carried no real trajectory damping,
-        # so the loop limit-cycled — full lock across the line and back.
+        # control-loop dt (for the heading filter, integral, and command shaping)
         now = time.time()
-        cross_rate = self._cross_rate(cross, now)
-        speed_ms = max(c.live_speed_mph * 0.44704, 0.3)
-        raw_herr = math.degrees(math.asin(max(-1.0, min(1.0, cross_rate / speed_ms))))
-        heading_err = self._smooth_heading_err(raw_herr)
-        if c.live_speed_mph < c.heading_min_speed_mph:
-            heading_err = 0.0   # rate estimate is meaningless when barely moving
+        dt = (now - self._prev_step_ts) if self._prev_step_ts is not None else 1.0 / c.rate_hz
+        dt = max(1e-3, min(dt, 0.5))
+        self._prev_step_ts = now
+        v_ms = c.live_speed_mph * 0.44704
 
-        # Stanley-style PD (POSITIVE column command = RIGHT turn):
-        #   pull  — P on cross-track: aim back toward the line, bounded by atan2.
-        #   align — D (damping): cancel heading error so we arrive PARALLEL to
-        #           the line instead of slicing across it and weaving back.
-        # Right of the line (cross<0) -> pull<0 -> turn left. As we swing left to
-        # recover, heading_err>0 (pointing left) -> align>0 -> turn right, easing
-        # off the lock BEFORE we reach the line so we settle instead of overshoot.
-        pull_deg = math.degrees(math.atan2(c.xtrack_gain * cross, max(c.lookahead_m, 0.5)))
-        align_deg = c.heading_gain * heading_err
-        correction_deg = pull_deg + align_deg
-        raw_steer_deg = c.steer_sign * c.steer_gain * correction_deg
-        steer_deg = max(-c.max_steer_deg, min(raw_steer_deg, c.max_steer_deg))
+        # Absolute cart heading from the wheel-angle yaw model fused with the GPS
+        # track (see _update_fused_heading). The measured wheel angle drives the
+        # lag-free prediction; GPS anchors it. This replaces the old, noisy
+        # cross-rate "heading" that made the loop saw across the line.
+        wheel_deg = self._last_actual_steer_deg or 0.0
+        fused = self._update_fused_heading(pos, v_ms, wheel_deg, dt)
+        # heading error: + = cart pointing RIGHT of the path direction
+        heading_err = geo.angle_diff_deg(fused, path_bearing) if fused is not None else 0.0
 
-        # Map needle = the path bearing leaned by the wheel angle, 1:1 — so the
-        # needle points almost exactly where the steering wheel is turned. Same
-        # smoothed wheel reading the steering term uses above, just shown
-        # unscaled. (GpsMarker eases the motion render-side; that doesn't change
-        # this value.)
-        heading_abs = (path_bearing + wheel_deg) % 360.0
+        # Stanley law, in ROAD-WHEEL degrees (POSITIVE = right turn):
+        #   ff    — curvature feedforward: the steady angle that holds the curve.
+        #   head  — align to the path direction (steer opposite the heading err).
+        #   cross — bounded pull back toward the line; atan keeps it gentle so a
+        #           2 m error at 3 mph asks for ~10 deg, never full lock.
+        curvature = self._path_curvature(snap.along_m)
+        ff_deg = math.degrees(math.atan(config.WHEELBASE_M * curvature))
+        head_deg = -c.st_k_heading * heading_err
+        v_soft = v_ms + c.st_cross_soft_mps
+        cross_deg = math.degrees(math.atan(c.st_k_cross * cross / max(v_soft, 0.2)))
+        cross_deg = max(-c.st_max_cross_road_deg, min(cross_deg, c.st_max_cross_road_deg))
+
+        # integral trim — null a steady bias (road crown / calibration) only when
+        # already close and moving; bleed it off otherwise so it can't wind up.
+        if abs(cross) < c.st_int_enable_cross_m and v_ms > 0.4:
+            self._st_integral += c.st_k_int * cross * dt
+            self._st_integral = max(-c.st_int_max_deg, min(self._st_integral, c.st_int_max_deg))
+        else:
+            self._st_integral *= 0.98
+
+        road_deg = ff_deg + head_deg + cross_deg + self._st_integral
+        column_raw = c.steer_sign * config.STEER_RATIO * road_deg
+        column_raw = max(-c.max_steer_deg, min(column_raw, c.max_steer_deg))
+
+        # Command shaping: low-pass then slew clamp so the column moves as one
+        # continuous motion instead of the old per-cycle jumps.
+        alpha = dt / (c.st_tau_cmd_s + dt)
+        target = self._st_cmd + alpha * (column_raw - self._st_cmd)
+        max_step = c.st_slew_deg_s * dt
+        target = self._st_cmd + max(-max_step, min(target - self._st_cmd, max_step))
+        self._st_cmd = target
+        steer_deg = target
+        correction_deg = road_deg   # reported as `alpha` in telemetry
+
+        # Map needle = the cart's actual (fused) heading; falls back to the path
+        # bearing leaned by the wheel angle until the fused estimate is seeded.
+        heading_abs = fused if fused is not None else (path_bearing + wheel_deg) % 360.0
 
         # --- throttle: closed-loop speed control (PI on GPS mph + brake) ---
         # Open-loop gas is miscalibrated (0.24 gave only ~2 mph) and blind to
