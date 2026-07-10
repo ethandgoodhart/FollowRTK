@@ -146,8 +146,12 @@ export default function DriveControl({ route, follow, speedMph, isConnected, sen
             <span className="text-sm font-semibold uppercase tracking-wide text-neutral-200">Front camera</span>
             {!obstacleOnline ? (
               <span className="text-sm text-red-400">○ detector offline</span>
+            ) : obstacle?.emergency ? (
+              <span className="rounded bg-red-600 px-2 py-0.5 text-sm font-bold text-white animate-pulse">FULL BRAKE</span>
             ) : obstacle?.brake ? (
-              <span className="rounded bg-red-600 px-2 py-0.5 text-sm font-bold text-white animate-pulse">BRAKE</span>
+              <span className="rounded bg-red-600 px-2 py-0.5 text-sm font-bold text-white animate-pulse">
+                BRAKE{obstacle.brake_fraction != null ? ` ${Math.round(obstacle.brake_fraction * 100)}%` : ''}
+              </span>
             ) : (
               <span className="rounded bg-green-700 px-2 py-0.5 text-sm font-bold text-white">CLEAR</span>
             )}
@@ -157,10 +161,19 @@ export default function DriveControl({ route, follow, speedMph, isConnected, sen
               {/* Annotated JPEG re-fetched every poll — a ~3fps feed is plenty to judge the zone. */}
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={obstacleFrameUrl} alt="front camera with brake zone" className="w-full rounded" />
+              {obstacle?.brake_fraction != null && (
+                <div className="mt-1.5 h-2 w-full overflow-hidden rounded bg-neutral-800">
+                  <div
+                    className={`h-full transition-all ${obstacle.emergency ? 'bg-red-500' : 'bg-orange-500'}`}
+                    style={{ width: `${Math.round(obstacle.brake_fraction * 100)}%` }}
+                  />
+                </div>
+              )}
               <div className="mt-1 flex justify-between text-sm text-neutral-300 tabular-nums">
                 <span>
-                  {obstacle?.detections.filter((d) => d.in_zone).length ?? 0} in zone
-                  {' · '}{obstacle?.detections.length ?? 0} seen
+                  {obstacle?.detections.filter((d) => d.in_zone).length ?? 0} in path
+                  {' · '}{obstacle?.detections.length ?? 0} tracked
+                  {obstacle?.ego_speed_mps != null && ` · ego ${(obstacle.ego_speed_mps * 2.237).toFixed(1)} mph`}
                 </span>
                 {obstacle?.video_t != null && <span>eval t={obstacle.video_t.toFixed(1)}s</span>}
               </div>

@@ -102,14 +102,25 @@ export interface ObstacleDetection {
   cls: string;
   conf: number;
   box: [number, number, number, number];  // pixel x1,y1,x2,y2 in the camera frame
-  in_zone: boolean;   // its footprint overlaps the brake zone
-  overlap: number;    // fraction of footprint inside the zone
+  in_zone: boolean;   // zone mode: footprint overlaps the brake zone; predictive: collision course
+  overlap: number;    // fraction of footprint inside the zone (zone mode)
+  // Predictive mode extras (obstacle/predictive.py):
+  id?: number;        // persistent track id
+  x_m?: number;       // cart-relative ground position, meters (right / forward)
+  z_m?: number;
+  vx?: number | null; // cart-relative velocity, m/s
+  vz?: number | null;
+  collide?: boolean;  // on a collision course with our trajectory
+  t_hit?: number | null;  // predicted seconds until it blocks our path
 }
 
-// Verdict from the camera obstacle detector: brake==true means something is
-// standing in the zone directly ahead of the cart right now.
+// Verdict from the camera obstacle detector. Zone mode gives a binary brake;
+// predictive mode adds brake_fraction: how hard to brake (0..1, 1 = full).
 export interface ObstacleStatus {
   brake: boolean;
+  brake_fraction?: number;  // predictive mode: required decel / max decel
+  emergency?: boolean;      // predictive mode: slam it now
+  ego_speed_mps?: number;   // predictive mode: cart speed used for the math
   detections: ObstacleDetection[];
   video_t?: number;   // seconds into the eval video (absent on live camera)
   connected: boolean;

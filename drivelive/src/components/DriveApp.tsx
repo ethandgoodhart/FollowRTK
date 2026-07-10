@@ -62,7 +62,14 @@ export default function DriveApp({ rawAnnotations }: Props) {
   const [obstacleAvoid, setObstacleAvoid] = useState(false);
   const obstacleUrl = process.env.NEXT_PUBLIC_OBSTACLE_URL || 'http://localhost:8766';
   const { status: obstacle, online: obstacleOnline, frameUrl: obstacleFrameUrl } = useObstacle(obstacleAvoid, obstacleUrl);
-  const obstacleBrake = obstacleAvoid && (obstacle?.brake ?? false);
+  // Zone mode (no brake_fraction) stops on any brake. Predictive mode only
+  // forces a stop for serious demands (emergency or >=60% brake) — the cart
+  // bridge has no partial-brake command yet, so lighter asks stay advisory.
+  const obstacleBrake = obstacleAvoid && (
+    obstacle?.brake_fraction != null
+      ? (obstacle.emergency ?? false) || obstacle.brake_fraction >= 0.6
+      : obstacle?.brake ?? false
+  );
   const sentStopRef = useRef(false);
   useEffect(() => {
     if (!obstacleBrake || !driving) {

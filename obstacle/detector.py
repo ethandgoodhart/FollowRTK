@@ -232,9 +232,19 @@ def main() -> None:
     p.add_argument("--model", default="yolov8n.pt")
     p.add_argument("--port", type=int, default=8766)
     p.add_argument("--loop", action="store_true", help="loop the eval video")
+    p.add_argument("--predict", action="store_true",
+                   help="predictive mode: track objects, compute graduated brake")
+    p.add_argument("--ego", default="/Users/georgv.manstein/Downloads/pi-stanford-test-data/ego.jsonl",
+                   help="ego log for speed/yaw in predictive eval mode")
+    p.add_argument("--device", default=None, help="e.g. mps / cpu")
     args = p.parse_args()
 
-    det = Detector(args.model)
+    if args.predict:
+        from predictive import EgoLog, PredictiveAvoidance
+        ego = EgoLog(args.ego) if args.camera is None else None
+        det = PredictiveAvoidance(args.model, device=args.device, ego=ego)
+    else:
+        det = Detector(args.model, device=args.device)
     threading.Thread(target=playback_loop, args=(det, args), daemon=True).start()
 
     app = web.Application()

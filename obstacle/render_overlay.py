@@ -27,9 +27,16 @@ def main() -> None:
     p.add_argument("--device", default=None, help="e.g. mps / cpu (default: ultralytics auto)")
     p.add_argument("--start", type=float, default=0.0, help="start time (s)")
     p.add_argument("--end", type=float, default=None, help="end time (s)")
+    p.add_argument("--predict", action="store_true",
+                   help="predictive mode: tracks, predicted paths, graduated brake")
+    p.add_argument("--ego", default="/Users/georgv.manstein/Downloads/pi-stanford-test-data/ego.jsonl")
     args = p.parse_args()
 
-    det = Detector(args.model, device=args.device)
+    if args.predict:
+        from predictive import EgoLog, PredictiveAvoidance
+        det = PredictiveAvoidance(args.model, device=args.device, ego=EgoLog(args.ego))
+    else:
+        det = Detector(args.model, device=args.device)
     cap = cv2.VideoCapture(args.video)
     fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
     w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
