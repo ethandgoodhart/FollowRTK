@@ -19,3 +19,10 @@ cart_api/last_drive.json
 
 # build artifacts
 *.tsbuildinfo
+
+# obstacle detector: local venv & downloaded model weights
+obstacle/.venv/
+*.pt
+
+# rendered eval videos
+obstacle/out/

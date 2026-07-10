@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { RouteState, FollowState } from '@/lib/types';
+import { RouteState, FollowState, ObstacleStatus } from '@/lib/types';
 
 interface Props {
   route: RouteState;
@@ -11,6 +11,11 @@ interface Props {
   sendCommand: (obj: object) => boolean;
   lockRoute: boolean;
   onToggleLockRoute: (value: boolean) => void;
+  obstacleAvoid: boolean;
+  onToggleObstacleAvoid: (value: boolean) => void;
+  obstacle: ObstacleStatus | null;
+  obstacleOnline: boolean;
+  obstacleFrameUrl: string | null;
 }
 
 const PHASE_COLOR: Record<string, string> = {
@@ -23,7 +28,7 @@ const PHASE_COLOR: Record<string, string> = {
 const DEFAULT_MAX_SPEED_MPH = 3.5;
 const MAX_SPEED_MPH = 20;
 
-export default function DriveControl({ route, follow, speedMph, isConnected, sendCommand, lockRoute, onToggleLockRoute }: Props) {
+export default function DriveControl({ route, follow, speedMph, isConnected, sendCommand, lockRoute, onToggleLockRoute, obstacleAvoid, onToggleObstacleAvoid, obstacle, obstacleOnline, obstacleFrameUrl }: Props) {
   const [maxSpeedMph, setMaxSpeedMph] = useState(DEFAULT_MAX_SPEED_MPH);
   const [tuning, setTuning] = useState({
     lookahead_m: 3.0,
@@ -118,6 +123,56 @@ export default function DriveControl({ route, follow, speedMph, isConnected, sen
           <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-all ${lockRoute ? 'left-[18px]' : 'left-0.5'}`} />
         </span>
       </button>
+
+      <button
+        type="button"
+        role="switch"
+        aria-checked={obstacleAvoid}
+        onClick={() => onToggleObstacleAvoid(!obstacleAvoid)}
+        className="mb-3 flex w-full items-center justify-between rounded-lg border border-neutral-800 bg-neutral-950/60 px-3 py-2 text-left"
+      >
+        <span className="text-sm text-neutral-100">
+          Active Obstacle Avoidance{' '}
+          <span className="text-neutral-300">(camera watches the path ahead, brakes if blocked)</span>
+        </span>
+        <span className={`relative ml-3 h-5 w-9 shrink-0 rounded-full transition-colors ${obstacleAvoid ? 'bg-purple-600' : 'bg-neutral-700'}`}>
+          <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-all ${obstacleAvoid ? 'left-[18px]' : 'left-0.5'}`} />
+        </span>
+      </button>
+
+      {obstacleAvoid && (
+        <div className="mb-3 rounded-lg border border-neutral-800 bg-neutral-950/60 p-2">
+          <div className="mb-1.5 flex items-center justify-between">
+            <span className="text-sm font-semibold uppercase tracking-wide text-neutral-200">Front camera</span>
+            {!obstacleOnline ? (
+              <span className="text-sm text-red-400">○ detector offline</span>
+            ) : obstacle?.brake ? (
+              <span className="rounded bg-red-600 px-2 py-0.5 text-sm font-bold text-white animate-pulse">BRAKE</span>
+            ) : (
+              <span className="rounded bg-green-700 px-2 py-0.5 text-sm font-bold text-white">CLEAR</span>
+            )}
+          </div>
+          {obstacleOnline && obstacleFrameUrl ? (
+            <>
+              {/* Annotated JPEG re-fetched every poll — a ~3fps feed is plenty to judge the zone. */}
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={obstacleFrameUrl} alt="front camera with brake zone" className="w-full rounded" />
+              <div className="mt-1 flex justify-between text-sm text-neutral-300 tabular-nums">
+                <span>
+                  {obstacle?.detections.filter((d) => d.in_zone).length ?? 0} in zone
+                  {' · '}{obstacle?.detections.length ?? 0} seen
+                </span>
+                {obstacle?.video_t != null && <span>eval t={obstacle.video_t.toFixed(1)}s</span>}
+              </div>
+            </>
+          ) : (
+            <p className="text-sm text-neutral-300">
+              Start it with:{' '}
+              <code className="text-neutral-200">obstacle/.venv/bin/python obstacle/detector.py --loop</code>
+            </p>
+          )}
+        </div>
+      )}
 
       <div className="flex flex-col gap-2 mb-3">
         <button

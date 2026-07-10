@@ -97,6 +97,26 @@ export interface RouteState {
   selecting: 'start' | 'end' | 'none';
 }
 
+// One object seen by the obstacle detector (obstacle/detector.py /status).
+export interface ObstacleDetection {
+  cls: string;
+  conf: number;
+  box: [number, number, number, number];  // pixel x1,y1,x2,y2 in the camera frame
+  in_zone: boolean;   // its footprint overlaps the brake zone
+  overlap: number;    // fraction of footprint inside the zone
+}
+
+// Verdict from the camera obstacle detector: brake==true means something is
+// standing in the zone directly ahead of the cart right now.
+export interface ObstacleStatus {
+  brake: boolean;
+  detections: ObstacleDetection[];
+  video_t?: number;   // seconds into the eval video (absent on live camera)
+  connected: boolean;
+  t?: number;
+  ended?: boolean;
+}
+
 // Live telemetry from the cart's path follower (cartlib.server "follow" msg).
 export interface FollowState {
   active: boolean;          // true while a drive is running, false on follow_end

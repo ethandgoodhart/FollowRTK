@@ -1,11 +1,12 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import mapboxgl from 'mapbox-gl';
 import { RawAnnotations, LatLng } from '@/lib/types';
 import { courseOverGround } from '@/lib/geo';
 import { useAnnotations } from '@/hooks/useAnnotations';
 import { useGps } from '@/hooks/useGps';
+import { useObstacle } from '@/hooks/useObstacle';
 import { useSpeed } from '@/hooks/useSpeed';
 import { useRoute } from '@/hooks/useRoute';
 import MapView from './MapView';
@@ -53,6 +54,26 @@ export default function DriveApp({ rawAnnotations }: Props) {
     else setFrozenPath(null);
   }, [lockRoute, driving, route.path]);
   const displayPath = lockRoute && driving && frozenPath ? frozenPath : route.path;
+
+  // Active Obstacle Avoidance: while on, poll the camera obstacle detector;
+  // if it says something is standing in the zone ahead mid-drive, send an
+  // emergency stop once per brake edge (follow_end clears `driving`, so this
+  // won't spam; flipping the toggle re-arms it).
+  const [obstacleAvoid, setObstacleAvoid] = useState(false);
+  const obstacleUrl = process.env.NEXT_PUBLIC_OBSTACLE_URL || 'http://localhost:8766';
+  const { status: obstacle, online: obstacleOnline, frameUrl: obstacleFrameUrl } = useObstacle(obstacleAvoid, obstacleUrl);
+  const obstacleBrake = obstacleAvoid && (obstacle?.brake ?? false);
+  const sentStopRef = useRef(false);
+  useEffect(() => {
+    if (!obstacleBrake || !driving) {
+      sentStopRef.current = false;
+      return;
+    }
+    if (!sentStopRef.current) {
+      sentStopRef.current = true;
+      sendCommand({ type: 'stop', emergency: true, reason: 'obstacle ahead' });
+    }
+  }, [obstacleBrake, driving, sendCommand]);
 
   // Panic stop: 'q' or Esc slams the brake to full immediately, anytime.
   // Ignored while typing in a field so it can't fire by accident.
@@ -106,7 +127,20 @@ export default function DriveApp({ rawAnnotations }: Props) {
         cornerCut={cornerCut}
         onCornerCutChange={setCornerCut}
       />
-      <DriveControl route={route} follow={follow} speedMph={speedMph} isConnected={isConnected} sendCommand={sendCommand} lockRoute={lockRoute} onToggleLockRoute={setLockRoute} />
+      <DriveControl
+        route={route}
+        follow={follow}
+        speedMph={speedMph}
+        isConnected={isConnected}
+        sendCommand={sendCommand}
+        lockRoute={lockRoute}
+        onToggleLockRoute={setLockRoute}
+        obstacleAvoid={obstacleAvoid}
+        onToggleObstacleAvoid={setObstacleAvoid}
+        obstacle={obstacle}
+        obstacleOnline={obstacleOnline}
+        obstacleFrameUrl={obstacleFrameUrl}
+      />
     </div>
   );
 }
