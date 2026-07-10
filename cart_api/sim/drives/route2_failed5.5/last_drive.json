@@ -1,0 +1,1443 @@
+{
+ "saved_at": "2026-07-10 10:31:16",
+ "armed": true,
+ "phase": "tracking",
+ "reason": "stopped",
+ "config": {
+  "max_speed_mph": 5.5,
+  "live_speed_mph": 5.439767053664231,
+  "lookahead_m": 3.0,
+  "steer_gain": 5.4,
+  "xtrack_gain": 1.5,
+  "heading_gain": 3.0,
+  "max_steer_deg": 320.0,
+  "turn_slowdown": 0.0
+ },
+ "path": [
+  {
+   "lat": 37.42668065869846,
+   "lon": -122.1654858897966
+  },
+  {
+   "lat": 37.42668191597852,
+   "lon": -122.16549254612568
+  },
+  {
+   "lat": 37.42668317309396,
+   "lon": -122.16549920250193
+  },
+  {
+   "lat": 37.426684429639835,
+   "lon": -122.16550585904136
+  },
+  {
+   "lat": 37.42668568464622,
+   "lon": -122.16551251602186
+  },
+  {
+   "lat": 37.42668693620895,
+   "lon": -122.165519173989
+  },
+  {
+   "lat": 37.42668818130548,
+   "lon": -122.16552583380874
+  },
+  {
+   "lat": 37.42668941611716,
+   "lon": -122.16553249657514
+  },
+  {
+   "lat": 37.426690636983224,
+   "lon": -122.1655391633368
+  },
+  {
+   "lat": 37.426691841646594,
+   "lon": -122.16554583473908
+  },
+  {
+   "lat": 37.42669303005943,
+   "lon": -122.16555251078945
+  },
+  {
+   "lat": 37.42669420408659,
+   "lon": -122.16555919093186
+  },
+  {
+   "lat": 37.426695366008545,
+   "lon": -122.1655658744522
+  },
+  {
+   "lat": 37.42669651641921,
+   "lon": -122.16557256104505
+  },
+  {
+   "lat": 37.426697652570056,
+   "lon": -122.16557925125463
+  },
+  {
+   "lat": 37.42669876829279,
+   "lon": -122.16558594649614
+  },
+  {
+   "lat": 37.42669985628751,
+   "lon": -122.165592648452
+  },
+  {
+   "lat": 37.42670091275484,
+   "lon": -122.16559935781429
+  },
+  {
+   "lat": 37.42670194329098,
+   "lon": -122.16560607256241
+  },
+  {
+   "lat": 37.42670296814147,
+   "lon": -122.16561278614918
+  },
+  {
+   "lat": 37.42670402465896,
+   "lon": -122.16561948610432
+  },
+  {
+   "lat": 37.42670516515064,
+   "lon": -122.16562615369983
+  },
+  {
+   "lat": 37.42670644930104,
+   "lon": -122.16563276538616
+  },
+  {
+   "lat": 37.42670793219946,
+   "lon": -122.16563929642777
+  },
+  {
+   "lat": 37.42670965126223,
+   "lon": -122.16564572633456
+  },
+  {
+   "lat": 37.42671161666606,
+   "lon": -122.16565204453696
+  },
+  {
+   "lat": 37.42671380903575,
+   "lon": -122.16565825403924
+  },
+  {
+   "lat": 37.426716185185654,
+   "lon": -122.16566437127064
+  },
+  {
+   "lat": 37.426718689332205,
+   "lon": -122.16567042203107
+  },
+  {
+   "lat": 37.42672126535028,
+   "lon": -122.16567643525374
+  },
+  {
+   "lat": 37.426723866245865,
+   "lon": -122.16568243699544
+  },
+  {
+   "lat": 37.426726459257225,
+   "lon": -122.1656884463257
+  },
+  {
+   "lat": 37.42672902710551,
+   "lon": -122.16569447350089
+  },
+  {
+   "lat": 37.42673156674994,
+   "lon": -122.16570051997839
+  },
+  {
+   "lat": 37.42673408677071,
+   "lon": -122.16570657965549
+  },
+  {
+   "lat": 37.42673660397733,
+   "lon": -122.16571264088142
+  },
+  {
+   "lat": 37.426739139454284,
+   "lon": -122.16571868900377
+  },
+  {
+   "lat": 37.426741714249786,
+   "lon": -122.16572470921528
+  },
+  {
+   "lat": 37.42674434554949,
+   "lon": -122.16573068901081
+  },
+  {
+   "lat": 37.4267470450417,
+   "lon": -122.16573661894316
+  },
+  {
+   "lat": 37.42674982089436,
+   "lon": -122.16574249064175
+  },
+  {
+   "lat": 37.426752682481954,
+   "lon": -122.16574829288989
+  },
+  {
+   "lat": 37.42675564419854,
+   "lon": -122.16575400882023
+  },
+  {
+   "lat": 37.426758724341184,
+   "lon": -122.16575961759506
+  },
+  {
+   "lat": 37.42676193839277,
+   "lon": -122.16576510112816
+  },
+  {
+   "lat": 37.426765290662416,
+   "lon": -122.16577045231162
+  },
+  {
+   "lat": 37.42676877007844,
+   "lon": -122.1657756793524
+  },
+  {
+   "lat": 37.426772353212115,
+   "lon": -122.16578080309002
+  },
+  {
+   "lat": 37.42677601261279,
+   "lon": -122.16578584887621
+  },
+  {
+   "lat": 37.426779725308485,
+   "lon": -122.16579083800633
+  },
+  {
+   "lat": 37.42678347703725,
+   "lon": -122.16579578333406
+  },
+  {
+   "lat": 37.42678726125297,
+   "lon": -122.16580069028991
+  },
+  {
+   "lat": 37.426791075275716,
+   "lon": -122.16580556091523
+  },
+  {
+   "lat": 37.426794916982175,
+   "lon": -122.1658103972143
+  },
+  {
+   "lat": 37.426798784025905,
+   "lon": -122.16581520158779
+  },
+  {
+   "lat": 37.42680267518417,
+   "lon": -122.16581997487316
+  },
+  {
+   "lat": 37.426806591833554,
+   "lon": -122.1658247144455
+  },
+  {
+   "lat": 37.42681053775182,
+   "lon": -122.16582941458782
+  },
+  {
+   "lat": 37.42681451708678,
+   "lon": -122.16583406924107
+  },
+  {
+   "lat": 37.426818532017094,
+   "lon": -122.16583867507202
+  },
+  {
+   "lat": 37.42682258191567,
+   "lon": -122.16584323246315
+  },
+  {
+   "lat": 37.42682666446291,
+   "lon": -122.16584774390549
+  },
+  {
+   "lat": 37.426830777396745,
+   "lon": -122.16585221166254
+  },
+  {
+   "lat": 37.42683491905818,
+   "lon": -122.1658566372394
+  },
+  {
+   "lat": 37.42683908697817,
+   "lon": -122.16586102361023
+  },
+  {
+   "lat": 37.42684327530817,
+   "lon": -122.16586537895378
+  },
+  {
+   "lat": 37.426847472613844,
+   "lon": -122.16586971967968
+  },
+  {
+   "lat": 37.42685166128416,
+   "lon": -122.16587407099881
+  },
+  {
+   "lat": 37.426855819235,
+   "lon": -122.16587846420202
+  },
+  {
+   "lat": 37.42685992393513,
+   "lon": -122.165882930763
+  },
+  {
+   "lat": 37.42686395764757,
+   "lon": -122.16588749488224
+  },
+  {
+   "lat": 37.42686791134241,
+   "lon": -122.165892167898
+  },
+  {
+   "lat": 37.426871784388965,
+   "lon": -122.16589694829939
+  },
+  {
+   "lat": 37.42687557911711,
+   "lon": -122.16590182838632
+  },
+  {
+   "lat": 37.4268792928922,
+   "lon": -122.16590680413272
+  },
+  {
+   "lat": 37.426882912822435,
+   "lon": -122.16591188200763
+  },
+  {
+   "lat": 37.42688641730111,
+   "lon": -122.16591707801176
+  },
+  {
+   "lat": 37.42688978443618,
+   "lon": -122.16592240923254
+  },
+  {
+   "lat": 37.42689300274152,
+   "lon": -122.16592788321194
+  },
+  {
+   "lat": 37.4268960775789,
+   "lon": -122.16593349180759
+  },
+  {
+   "lat": 37.426899029186515,
+   "lon": -122.165939213196
+  },
+  {
+   "lat": 37.42690188314929,
+   "lon": -122.16594502056589
+  },
+  {
+   "lat": 37.42690465852752,
+   "lon": -122.16595089238058
+  },
+  {
+   "lat": 37.426907360004996,
+   "lon": -122.16595681882924
+  },
+  {
+   "lat": 37.4269099780487,
+   "lon": -122.16596280172952
+  },
+  {
+   "lat": 37.42691249669791,
+   "lon": -122.16596884877613
+  },
+  {
+   "lat": 37.4269149044438,
+   "lon": -122.16597496579539
+  },
+  {
+   "lat": 37.42691720197014,
+   "lon": -122.16598115133516
+  },
+  {
+   "lat": 37.42691940259208,
+   "lon": -122.16598739616418
+  },
+  {
+   "lat": 37.42692152600132,
+   "lon": -122.1659936870816
+  },
+  {
+   "lat": 37.426923590084755,
+   "lon": -122.1660000119534
+  },
+  {
+   "lat": 37.426925606077454,
+   "lon": -122.16600636276569
+  },
+  {
+   "lat": 37.426927579091725,
+   "lon": -122.16601273550259
+  },
+  {
+   "lat": 37.42692951201337,
+   "lon": -122.16601912800806
+  },
+  {
+   "lat": 37.42693140897124,
+   "lon": -122.16602553795363
+  },
+  {
+   "lat": 37.42693327587716,
+   "lon": -122.16603196229545
+  },
+  {
+   "lat": 37.4269351182814,
+   "lon": -122.16603839813996
+  },
+  {
+   "lat": 37.42693693873598,
+   "lon": -122.16604484394261
+  },
+  {
+   "lat": 37.42693873588249,
+   "lon": -122.16605129995978
+  },
+  {
+   "lat": 37.42694050600581,
+   "lon": -122.16605776758918
+  },
+  {
+   "lat": 37.426942246049194,
+   "lon": -122.16606424804723
+  },
+  {
+   "lat": 37.42694395619419,
+   "lon": -122.16607074122622
+  },
+  {
+   "lat": 37.426945640541504,
+   "lon": -122.166077245374
+  },
+  {
+   "lat": 37.42694730577679,
+   "lon": -122.16608375764656
+  },
+  {
+   "lat": 37.42694895893452,
+   "lon": -122.16609027505325
+  },
+  {
+   "lat": 37.4269506056266,
+   "lon": -122.16609679520846
+  },
+  {
+   "lat": 37.42695224941327,
+   "lon": -122.16610331659871
+  },
+  {
+   "lat": 37.426953892119585,
+   "lon": -122.16610983844822
+  },
+  {
+   "lat": 37.42695553451221,
+   "lon": -122.16611636043109
+  }
+ ],
+ "n_steps": 34,
+ "steps": [
+  {
+   "phase": "tracking",
+   "reason": "",
+   "fix": "RTK Float",
+   "lat": 37.426649,
+   "lon": -122.16551717,
+   "ts": 1783704658.863397,
+   "alpha": 63.8,
+   "steer_cmd": 320.0,
+   "gas": 0.344,
+   "brake": 0.0,
+   "max_speed_mph": 5.5,
+   "lookahead_i": 3,
+   "xtrack_m": 4.06,
+   "xtrack_signed_m": 4.06,
+   "heading_deg": 283.4,
+   "heading_err_deg": 0.0,
+   "dist_to_goal_m": 62.9,
+   "steering_actual_deg": -29.0,
+   "steering_target_deg": 320.0,
+   "live_speed_mph": 0.0,
+   "lookahead_m": 3.0,
+   "steer_gain": 5.4,
+   "xtrack_gain": 1.5,
+   "max_steer_deg": 320.0,
+   "turn_slowdown": 0.0,
+   "armed": true,
+   "t": 0.452
+  },
+  {
+   "phase": "tracking",
+   "reason": "",
+   "fix": "RTK Float",
+   "lat": 37.426649,
+   "lon": -122.16551717,
+   "ts": 1783704659.3648121,
+   "alpha": 63.8,
+   "steer_cmd": 320.0,
+   "gas": 0.36,
+   "brake": 0.0,
+   "max_speed_mph": 5.5,
+   "lookahead_i": 3,
+   "xtrack_m": 4.06,
+   "xtrack_signed_m": 4.06,
+   "heading_deg": 265.9,
+   "heading_err_deg": 0.0,
+   "dist_to_goal_m": 62.9,
+   "steering_actual_deg": 91.6,
+   "steering_target_deg": 320.0,
+   "live_speed_mph": 0.2,
+   "lookahead_m": 3.0,
+   "steer_gain": 5.4,
+   "xtrack_gain": 1.5,
+   "max_steer_deg": 320.0,
+   "turn_slowdown": 0.0,
+   "armed": true,
+   "t": 0.972
+  },
+  {
+   "phase": "tracking",
+   "reason": "",
+   "fix": "RTK Float",
+   "lat": 37.426649,
+   "lon": -122.16551733,
+   "ts": 1783704659.8557253,
+   "alpha": 63.8,
+   "steer_cmd": 320.0,
+   "gas": 0.36,
+   "brake": 0.0,
+   "max_speed_mph": 5.5,
+   "lookahead_i": 3,
+   "xtrack_m": 4.07,
+   "xtrack_signed_m": 4.07,
+   "heading_deg": 331.4,
+   "heading_err_deg": 0.0,
+   "dist_to_goal_m": 62.9,
+   "steering_actual_deg": 301.8,
+   "steering_target_deg": 320.0,
+   "live_speed_mph": 1.6,
+   "lookahead_m": 3.0,
+   "steer_gain": 5.4,
+   "xtrack_gain": 1.5,
+   "max_steer_deg": 320.0,
+   "turn_slowdown": 0.0,
+   "armed": true,
+   "t": 1.491
+  },
+  {
+   "phase": "tracking",
+   "reason": "",
+   "fix": "RTK Float",
+   "lat": 37.426651,
+   "lon": -122.16552083,
+   "ts": 1783704660.4668741,
+   "alpha": 36.3,
+   "steer_cmd": 196.3,
+   "gas": 0.321,
+   "brake": 0.0,
+   "max_speed_mph": 5.5,
+   "lookahead_i": 3,
+   "xtrack_m": 3.92,
+   "xtrack_signed_m": 3.92,
+   "heading_deg": 123.6,
+   "heading_err_deg": -8.9,
+   "dist_to_goal_m": 62.5,
+   "steering_actual_deg": 320.2,
+   "steering_target_deg": 196.3,
+   "live_speed_mph": 2.8,
+   "lookahead_m": 3.0,
+   "steer_gain": 5.4,
+   "xtrack_gain": 1.5,
+   "max_steer_deg": 320.0,
+   "turn_slowdown": 0.0,
+   "armed": true,
+   "t": 2.011
+  },
+  {
+   "phase": "tracking",
+   "reason": "",
+   "fix": "RTK Float",
+   "lat": 37.42665483,
+   "lon": -122.16552533,
+   "ts": 1783704660.9596393,
+   "alpha": 9.8,
+   "steer_cmd": 52.8,
+   "gas": 0.301,
+   "brake": 0.0,
+   "max_speed_mph": 5.5,
+   "lookahead_i": 4,
+   "xtrack_m": 3.6,
+   "xtrack_signed_m": 3.6,
+   "heading_deg": 195.5,
+   "heading_err_deg": -17.1,
+   "dist_to_goal_m": 62.0,
+   "steering_actual_deg": 215.6,
+   "steering_target_deg": 52.8,
+   "live_speed_mph": 3.2,
+   "lookahead_m": 3.0,
+   "steer_gain": 5.4,
+   "xtrack_gain": 1.5,
+   "max_steer_deg": 320.0,
+   "turn_slowdown": 0.0,
+   "armed": true,
+   "t": 2.53
+  },
+  {
+   "phase": "tracking",
+   "reason": "",
+   "fix": "RTK Float",
+   "lat": 37.42665933,
+   "lon": -122.1655305,
+   "ts": 1783704661.4619355,
+   "alpha": -10.2,
+   "steer_cmd": -54.9,
+   "gas": 0.305,
+   "brake": 0.0,
+   "max_speed_mph": 5.5,
+   "lookahead_i": 5,
+   "xtrack_m": 3.22,
+   "xtrack_signed_m": 3.22,
+   "heading_deg": 161.5,
+   "heading_err_deg": -22.8,
+   "dist_to_goal_m": 61.3,
+   "steering_actual_deg": 63.7,
+   "steering_target_deg": -54.9,
+   "live_speed_mph": 3.0,
+   "lookahead_m": 3.0,
+   "steer_gain": 5.4,
+   "xtrack_gain": 1.5,
+   "max_steer_deg": 320.0,
+   "turn_slowdown": 0.0,
+   "armed": true,
+   "t": 3.05
+  },
+  {
+   "phase": "tracking",
+   "reason": "",
+   "fix": "RTK Float",
+   "lat": 37.42666333,
+   "lon": -122.165536,
+   "ts": 1783704661.960477,
+   "alpha": -16.7,
+   "steer_cmd": -90.3,
+   "gas": 0.32,
+   "brake": 0.0,
+   "max_speed_mph": 5.5,
+   "lookahead_i": 6,
+   "xtrack_m": 2.9,
+   "xtrack_signed_m": 2.9,
+   "heading_deg": 56.6,
+   "heading_err_deg": -24.0,
+   "dist_to_goal_m": 60.7,
+   "steering_actual_deg": -53.2,
+   "steering_target_deg": -90.3,
+   "live_speed_mph": 3.2,
+   "lookahead_m": 3.0,
+   "steer_gain": 5.4,
+   "xtrack_gain": 1.5,
+   "max_steer_deg": 320.0,
+   "turn_slowdown": 0.0,
+   "armed": true,
+   "t": 3.568
+  },
+  {
+   "phase": "tracking",
+   "reason": "",
+   "fix": "RTK Float",
+   "lat": 37.426667,
+   "lon": -122.16554217,
+   "ts": 1783704662.458332,
+   "alpha": -16.6,
+   "steer_cmd": -89.8,
+   "gas": 0.333,
+   "brake": 0.0,
+   "max_speed_mph": 5.5,
+   "lookahead_i": 7,
+   "xtrack_m": 2.62,
+   "xtrack_signed_m": 2.62,
+   "heading_deg": 304.5,
+   "heading_err_deg": -23.1,
+   "dist_to_goal_m": 60.0,
+   "steering_actual_deg": -90.6,
+   "steering_target_deg": -89.8,
+   "live_speed_mph": 3.3,
+   "lookahead_m": 3.0,
+   "steer_gain": 5.4,
+   "xtrack_gain": 1.5,
+   "max_steer_deg": 320.0,
+   "turn_slowdown": 0.0,
+   "armed": true,
+   "t": 4.088
+  },
+  {
+   "phase": "tracking",
+   "reason": "",
+   "fix": "RTK Float",
+   "lat": 37.4266705,
+   "lon": -122.16554883,
+   "ts": 1783704662.9582589,
+   "alpha": -14.1,
+   "steer_cmd": -75.9,
+   "gas": 0.342,
+   "brake": 0.0,
+   "max_speed_mph": 5.5,
+   "lookahead_i": 8,
+   "xtrack_m": 2.37,
+   "xtrack_signed_m": 2.37,
+   "heading_deg": 237.1,
+   "heading_err_deg": -21.3,
+   "dist_to_goal_m": 59.3,
+   "steering_actual_deg": -89.9,
+   "steering_target_deg": -75.9,
+   "live_speed_mph": 3.4,
+   "lookahead_m": 3.0,
+   "steer_gain": 5.4,
+   "xtrack_gain": 1.5,
+   "max_steer_deg": 320.0,
+   "turn_slowdown": 0.0,
+   "armed": true,
+   "t": 4.607
+  },
+  {
+   "phase": "tracking",
+   "reason": "",
+   "fix": "RTK Float",
+   "lat": 37.4266745,
+   "lon": -122.16555767,
+   "ts": 1783704663.559547,
+   "alpha": -14.4,
+   "steer_cmd": -77.8,
+   "gas": 0.35,
+   "brake": 0.0,
+   "max_speed_mph": 5.5,
+   "lookahead_i": 9,
+   "xtrack_m": 2.11,
+   "xtrack_signed_m": 2.11,
+   "heading_deg": 210.4,
+   "heading_err_deg": -20.3,
+   "dist_to_goal_m": 58.4,
+   "steering_actual_deg": -76.0,
+   "steering_target_deg": -77.8,
+   "live_speed_mph": 3.7,
+   "lookahead_m": 3.0,
+   "steer_gain": 5.4,
+   "xtrack_gain": 1.5,
+   "max_steer_deg": 320.0,
+   "turn_slowdown": 0.0,
+   "armed": true,
+   "t": 5.126
+  },
+  {
+   "phase": "tracking",
+   "reason": "",
+   "fix": "RTK Float",
+   "lat": 37.42667767,
+   "lon": -122.1655655,
+   "ts": 1783704664.0669215,
+   "alpha": -9.4,
+   "steer_cmd": -50.6,
+   "gas": 0.36,
+   "brake": 0.0,
+   "max_speed_mph": 5.5,
+   "lookahead_i": 11,
+   "xtrack_m": 1.92,
+   "xtrack_signed_m": 1.92,
+   "heading_deg": 207.9,
+   "heading_err_deg": -17.7,
+   "dist_to_goal_m": 57.6,
+   "steering_actual_deg": -77.8,
+   "steering_target_deg": -50.6,
+   "live_speed_mph": 3.9,
+   "lookahead_m": 3.0,
+   "steer_gain": 5.4,
+   "xtrack_gain": 1.5,
+   "max_steer_deg": 320.0,
+   "turn_slowdown": 0.0,
+   "armed": true,
+   "t": 5.645
+  },
+  {
+   "phase": "tracking",
+   "reason": "",
+   "fix": "RTK Float",
+   "lat": 37.426681,
+   "lon": -122.16557417,
+   "ts": 1783704664.5618124,
+   "alpha": -7.0,
+   "steer_cmd": -37.9,
+   "gas": 0.353,
+   "brake": 0.0,
+   "max_speed_mph": 5.5,
+   "lookahead_i": 12,
+   "xtrack_m": 1.72,
+   "xtrack_signed_m": 1.72,
+   "heading_deg": 205.8,
+   "heading_err_deg": -15.9,
+   "dist_to_goal_m": 56.8,
+   "steering_actual_deg": -50.6,
+   "steering_target_deg": -37.9,
+   "live_speed_mph": 4.2,
+   "lookahead_m": 3.0,
+   "steer_gain": 5.4,
+   "xtrack_gain": 1.5,
+   "max_steer_deg": 320.0,
+   "turn_slowdown": 0.0,
+   "armed": true,
+   "t": 6.165
+  },
+  {
+   "phase": "tracking",
+   "reason": "",
+   "fix": "RTK Float",
+   "lat": 37.4266845,
+   "lon": -122.1655835,
+   "ts": 1783704665.0631146,
+   "alpha": -7.0,
+   "steer_cmd": -37.6,
+   "gas": 0.354,
+   "brake": 0.0,
+   "max_speed_mph": 5.5,
+   "lookahead_i": 14,
+   "xtrack_m": 1.51,
+   "xtrack_signed_m": 1.51,
+   "heading_deg": 220.9,
+   "heading_err_deg": -14.7,
+   "dist_to_goal_m": 55.9,
+   "steering_actual_deg": -38.0,
+   "steering_target_deg": -37.6,
+   "live_speed_mph": 4.2,
+   "lookahead_m": 3.0,
+   "steer_gain": 5.4,
+   "xtrack_gain": 1.5,
+   "max_steer_deg": 320.0,
+   "turn_slowdown": 0.0,
+   "armed": true,
+   "t": 6.684
+  },
+  {
+   "phase": "tracking",
+   "reason": "",
+   "fix": "RTK Float",
+   "lat": 37.42668867,
+   "lon": -122.16559533,
+   "ts": 1783704665.656652,
+   "alpha": -11.4,
+   "steer_cmd": -61.6,
+   "gas": 0.358,
+   "brake": 0.0,
+   "max_speed_mph": 5.5,
+   "lookahead_i": 15,
+   "xtrack_m": 1.27,
+   "xtrack_signed_m": 1.27,
+   "heading_deg": 234.4,
+   "heading_err_deg": -14.6,
+   "dist_to_goal_m": 54.7,
+   "steering_actual_deg": -37.5,
+   "steering_target_deg": -61.6,
+   "live_speed_mph": 4.3,
+   "lookahead_m": 3.0,
+   "steer_gain": 5.4,
+   "xtrack_gain": 1.5,
+   "max_steer_deg": 320.0,
+   "turn_slowdown": 0.0,
+   "armed": true,
+   "t": 7.203
+  },
+  {
+   "phase": "tracking",
+   "reason": "",
+   "fix": "RTK Float",
+   "lat": 37.42669183,
+   "lon": -122.16560583,
+   "ts": 1783704666.1620083,
+   "alpha": -9.0,
+   "steer_cmd": -48.7,
+   "gas": 0.36,
+   "brake": 0.0,
+   "max_speed_mph": 5.5,
+   "lookahead_i": 17,
+   "xtrack_m": 1.1,
+   "xtrack_signed_m": 1.1,
+   "heading_deg": 239.6,
+   "heading_err_deg": -12.6,
+   "dist_to_goal_m": 53.8,
+   "steering_actual_deg": -61.5,
+   "steering_target_deg": -48.7,
+   "live_speed_mph": 4.7,
+   "lookahead_m": 3.0,
+   "steer_gain": 5.4,
+   "xtrack_gain": 1.5,
+   "max_steer_deg": 320.0,
+   "turn_slowdown": 0.0,
+   "armed": true,
+   "t": 7.722
+  },
+  {
+   "phase": "tracking",
+   "reason": "",
+   "fix": "RTK Float",
+   "lat": 37.426695,
+   "lon": -122.16561683,
+   "ts": 1783704666.6547976,
+   "alpha": -7.7,
+   "steer_cmd": -41.6,
+   "gas": 0.346,
+   "brake": 0.0,
+   "max_speed_mph": 5.5,
+   "lookahead_i": 19,
+   "xtrack_m": 0.94,
+   "xtrack_signed_m": 0.94,
+   "heading_deg": 227.8,
+   "heading_err_deg": -10.9,
+   "dist_to_goal_m": 52.8,
+   "steering_actual_deg": -48.9,
+   "steering_target_deg": -41.6,
+   "live_speed_mph": 4.9,
+   "lookahead_m": 3.0,
+   "steer_gain": 5.4,
+   "xtrack_gain": 1.5,
+   "max_steer_deg": 320.0,
+   "turn_slowdown": 0.0,
+   "armed": true,
+   "t": 8.241
+  },
+  {
+   "phase": "tracking",
+   "reason": "",
+   "fix": "RTK Float",
+   "lat": 37.42669767,
+   "lon": -122.16562883,
+   "ts": 1783704667.1575143,
+   "alpha": -0.6,
+   "steer_cmd": -3.2,
+   "gas": 0.34,
+   "brake": 0.0,
+   "max_speed_mph": 5.5,
+   "lookahead_i": 21,
+   "xtrack_m": 0.87,
+   "xtrack_signed_m": 0.87,
+   "heading_deg": 233.1,
+   "heading_err_deg": -8.0,
+   "dist_to_goal_m": 51.7,
+   "steering_actual_deg": -41.6,
+   "steering_target_deg": -3.2,
+   "live_speed_mph": 5.1,
+   "lookahead_m": 3.0,
+   "steer_gain": 5.4,
+   "xtrack_gain": 1.5,
+   "max_steer_deg": 320.0,
+   "turn_slowdown": 0.0,
+   "armed": true,
+   "t": 8.76
+  },
+  {
+   "phase": "tracking",
+   "reason": "",
+   "fix": "RTK Float",
+   "lat": 37.4267005,
+   "lon": -122.16564117,
+   "ts": 1783704667.6631117,
+   "alpha": 6.9,
+   "steer_cmd": 37.3,
+   "gas": 0.339,
+   "brake": 0.0,
+   "max_speed_mph": 5.5,
+   "lookahead_i": 22,
+   "xtrack_m": 0.84,
+   "xtrack_signed_m": 0.84,
+   "heading_deg": 240.7,
+   "heading_err_deg": -5.3,
+   "dist_to_goal_m": 50.6,
+   "steering_actual_deg": -3.1,
+   "steering_target_deg": 37.3,
+   "live_speed_mph": 5.7,
+   "lookahead_m": 3.0,
+   "steer_gain": 5.4,
+   "xtrack_gain": 1.5,
+   "max_steer_deg": 320.0,
+   "turn_slowdown": 0.0,
+   "armed": true,
+   "t": 9.28
+  },
+  {
+   "phase": "tracking",
+   "reason": "",
+   "fix": "RTK Float",
+   "lat": 37.42670383,
+   "lon": -122.16565467,
+   "ts": 1783704668.1603286,
+   "alpha": 17.1,
+   "steer_cmd": 92.4,
+   "gas": 0.321,
+   "brake": 0.0,
+   "max_speed_mph": 5.5,
+   "lookahead_i": 24,
+   "xtrack_m": 0.89,
+   "xtrack_signed_m": 0.89,
+   "heading_deg": 271.4,
+   "heading_err_deg": -2.3,
+   "dist_to_goal_m": 49.5,
+   "steering_actual_deg": 37.2,
+   "steering_target_deg": 92.4,
+   "live_speed_mph": 5.8,
+   "lookahead_m": 3.0,
+   "steer_gain": 5.4,
+   "xtrack_gain": 1.5,
+   "max_steer_deg": 320.0,
+   "turn_slowdown": 0.0,
+   "armed": true,
+   "t": 9.799
+  },
+  {
+   "phase": "tracking",
+   "reason": "",
+   "fix": "RTK Float",
+   "lat": 37.426709,
+   "lon": -122.1656705,
+   "ts": 1783704668.755837,
+   "alpha": 25.0,
+   "steer_cmd": 134.9,
+   "gas": 0.319,
+   "brake": 0.0,
+   "max_speed_mph": 5.5,
+   "lookahead_i": 27,
+   "xtrack_m": 0.96,
+   "xtrack_signed_m": 0.96,
+   "heading_deg": 311.9,
+   "heading_err_deg": -0.2,
+   "dist_to_goal_m": 48.0,
+   "steering_actual_deg": 92.4,
+   "steering_target_deg": 134.9,
+   "live_speed_mph": 5.8,
+   "lookahead_m": 3.0,
+   "steer_gain": 5.4,
+   "xtrack_gain": 1.5,
+   "max_steer_deg": 320.0,
+   "turn_slowdown": 0.0,
+   "armed": true,
+   "t": 10.318
+  },
+  {
+   "phase": "tracking",
+   "reason": "",
+   "fix": "RTK Float",
+   "lat": 37.42671517,
+   "lon": -122.16568317,
+   "ts": 1783704669.2595189,
+   "alpha": 19.3,
+   "steer_cmd": 104.4,
+   "gas": 0.315,
+   "brake": 0.0,
+   "max_speed_mph": 5.5,
+   "lookahead_i": 29,
+   "xtrack_m": 0.88,
+   "xtrack_signed_m": 0.88,
+   "heading_deg": 359.8,
+   "heading_err_deg": -1.5,
+   "dist_to_goal_m": 46.7,
+   "steering_actual_deg": 135.1,
+   "steering_target_deg": 104.4,
+   "live_speed_mph": 5.6,
+   "lookahead_m": 3.0,
+   "steer_gain": 5.4,
+   "xtrack_gain": 1.5,
+   "max_steer_deg": 320.0,
+   "turn_slowdown": 0.0,
+   "armed": true,
+   "t": 10.838
+  },
+  {
+   "phase": "tracking",
+   "reason": "",
+   "fix": "RTK Float",
+   "lat": 37.42672233,
+   "lon": -122.16569467,
+   "ts": 1783704669.7647984,
+   "alpha": 4.4,
+   "steer_cmd": 23.5,
+   "gas": 0.319,
+   "brake": 0.0,
+   "max_speed_mph": 5.5,
+   "lookahead_i": 31,
+   "xtrack_m": 0.66,
+   "xtrack_signed_m": 0.66,
+   "heading_deg": 43.7,
+   "heading_err_deg": -4.7,
+   "dist_to_goal_m": 45.4,
+   "steering_actual_deg": 104.6,
+   "steering_target_deg": 23.5,
+   "live_speed_mph": 5.7,
+   "lookahead_m": 3.0,
+   "steer_gain": 5.4,
+   "xtrack_gain": 1.5,
+   "max_steer_deg": 320.0,
+   "turn_slowdown": 0.0,
+   "armed": true,
+   "t": 11.357
+  },
+  {
+   "phase": "tracking",
+   "reason": "",
+   "fix": "RTK Float",
+   "lat": 37.42673017,
+   "lon": -122.16570483,
+   "ts": 1783704670.2583268,
+   "alpha": -18.1,
+   "steer_cmd": -97.9,
+   "gas": 0.318,
+   "brake": 0.0,
+   "max_speed_mph": 5.5,
+   "lookahead_i": 33,
+   "xtrack_m": 0.31,
+   "xtrack_signed_m": 0.31,
+   "heading_deg": 42.6,
+   "heading_err_deg": -9.0,
+   "dist_to_goal_m": 44.1,
+   "steering_actual_deg": 25.5,
+   "steering_target_deg": -97.9,
+   "live_speed_mph": 5.4,
+   "lookahead_m": 3.0,
+   "steer_gain": 5.4,
+   "xtrack_gain": 1.5,
+   "max_steer_deg": 320.0,
+   "turn_slowdown": 0.0,
+   "armed": true,
+   "t": 11.876
+  },
+  {
+   "phase": "tracking",
+   "reason": "",
+   "fix": "RTK Float",
+   "lat": 37.42673817,
+   "lon": -122.165715,
+   "ts": 1783704670.765441,
+   "alpha": -38.5,
+   "steer_cmd": -208.1,
+   "gas": 0.326,
+   "brake": 0.0,
+   "max_speed_mph": 5.5,
+   "lookahead_i": 35,
+   "xtrack_m": 0.06,
+   "xtrack_signed_m": -0.06,
+   "heading_deg": 355.1,
+   "heading_err_deg": -12.3,
+   "dist_to_goal_m": 42.9,
+   "steering_actual_deg": -88.8,
+   "steering_target_deg": -208.1,
+   "live_speed_mph": 5.5,
+   "lookahead_m": 3.0,
+   "steer_gain": 5.4,
+   "xtrack_gain": 1.5,
+   "max_steer_deg": 320.0,
+   "turn_slowdown": 0.0,
+   "armed": true,
+   "t": 12.395
+  },
+  {
+   "phase": "tracking",
+   "reason": "",
+   "fix": "RTK Float",
+   "lat": 37.426746,
+   "lon": -122.1657285,
+   "ts": 1783704671.3654776,
+   "alpha": -40.1,
+   "steer_cmd": -216.4,
+   "gas": 0.322,
+   "brake": 0.0,
+   "max_speed_mph": 5.5,
+   "lookahead_i": 37,
+   "xtrack_m": 0.25,
+   "xtrack_signed_m": -0.25,
+   "heading_deg": 268.6,
+   "heading_err_deg": -10.9,
+   "dist_to_goal_m": 41.4,
+   "steering_actual_deg": -205.4,
+   "steering_target_deg": -216.4,
+   "live_speed_mph": 5.3,
+   "lookahead_m": 3.0,
+   "steer_gain": 5.4,
+   "xtrack_gain": 1.5,
+   "max_steer_deg": 320.0,
+   "turn_slowdown": 0.0,
+   "armed": true,
+   "t": 12.916
+  },
+  {
+   "phase": "tracking",
+   "reason": "",
+   "fix": "RTK Float",
+   "lat": 37.42674933,
+   "lon": -122.16574167,
+   "ts": 1783704671.858376,
+   "alpha": -4.4,
+   "steer_cmd": -24.0,
+   "gas": 0.331,
+   "brake": 0.0,
+   "max_speed_mph": 5.5,
+   "lookahead_i": 39,
+   "xtrack_m": 0.01,
+   "xtrack_signed_m": 0.01,
+   "heading_deg": 165.4,
+   "heading_err_deg": -1.6,
+   "dist_to_goal_m": 40.3,
+   "steering_actual_deg": -216.8,
+   "steering_target_deg": -24.0,
+   "live_speed_mph": 5.3,
+   "lookahead_m": 3.0,
+   "steer_gain": 5.4,
+   "xtrack_gain": 1.5,
+   "max_steer_deg": 320.0,
+   "turn_slowdown": 0.0,
+   "armed": true,
+   "t": 13.435
+  },
+  {
+   "phase": "tracking",
+   "reason": "",
+   "fix": "RTK Float",
+   "lat": 37.42675083,
+   "lon": -122.165755,
+   "ts": 1783704672.3576655,
+   "alpha": 38.8,
+   "steer_cmd": 209.4,
+   "gas": 0.33,
+   "brake": 0.0,
+   "max_speed_mph": 5.5,
+   "lookahead_i": 41,
+   "xtrack_m": 0.5,
+   "xtrack_signed_m": 0.5,
+   "heading_deg": 118.9,
+   "heading_err_deg": 8.3,
+   "dist_to_goal_m": 39.2,
+   "steering_actual_deg": -91.8,
+   "steering_target_deg": 209.4,
+   "live_speed_mph": 5.2,
+   "lookahead_m": 3.0,
+   "steer_gain": 5.4,
+   "xtrack_gain": 1.5,
+   "max_steer_deg": 320.0,
+   "turn_slowdown": 0.0,
+   "armed": true,
+   "t": 13.954
+  },
+  {
+   "phase": "tracking",
+   "reason": "",
+   "fix": "RTK Float",
+   "lat": 37.4267525,
+   "lon": -122.165768,
+   "ts": 1783704672.865383,
+   "alpha": 71.7,
+   "steer_cmd": 320.0,
+   "gas": 0.341,
+   "brake": 0.0,
+   "max_speed_mph": 5.5,
+   "lookahead_i": 43,
+   "xtrack_m": 1.0,
+   "xtrack_signed_m": 1.0,
+   "heading_deg": 177.7,
+   "heading_err_deg": 15.1,
+   "dist_to_goal_m": 38.2,
+   "steering_actual_deg": 142.3,
+   "steering_target_deg": 320.0,
+   "live_speed_mph": 5.4,
+   "lookahead_m": 3.0,
+   "steer_gain": 5.4,
+   "xtrack_gain": 1.5,
+   "max_steer_deg": 320.0,
+   "turn_slowdown": 0.0,
+   "armed": true,
+   "t": 14.474
+  },
+  {
+   "phase": "tracking",
+   "reason": "",
+   "fix": "RTK Float",
+   "lat": 37.4267565,
+   "lon": -122.16578017,
+   "ts": 1783704673.3592818,
+   "alpha": 77.0,
+   "steer_cmd": 320.0,
+   "gas": 0.332,
+   "brake": 0.0,
+   "max_speed_mph": 5.5,
+   "lookahead_i": 45,
+   "xtrack_m": 1.3,
+   "xtrack_signed_m": 1.3,
+   "heading_deg": 343.9,
+   "heading_err_deg": 14.7,
+   "dist_to_goal_m": 37.0,
+   "steering_actual_deg": 313.6,
+   "steering_target_deg": 320.0,
+   "live_speed_mph": 5.4,
+   "lookahead_m": 3.0,
+   "steer_gain": 5.4,
+   "xtrack_gain": 1.5,
+   "max_steer_deg": 320.0,
+   "turn_slowdown": 0.0,
+   "armed": true,
+   "t": 14.993
+  },
+  {
+   "phase": "tracking",
+   "reason": "",
+   "fix": "RTK Float",
+   "lat": 37.4267655,
+   "lon": -122.165791,
+   "ts": 1783704673.9543886,
+   "alpha": 49.6,
+   "steer_cmd": 267.6,
+   "gas": 0.332,
+   "brake": 0.0,
+   "max_speed_mph": 5.5,
+   "lookahead_i": 47,
+   "xtrack_m": 1.17,
+   "xtrack_signed_m": 1.17,
+   "heading_deg": 154.1,
+   "heading_err_deg": 6.4,
+   "dist_to_goal_m": 35.7,
+   "steering_actual_deg": 320.2,
+   "steering_target_deg": 267.6,
+   "live_speed_mph": 5.3,
+   "lookahead_m": 3.0,
+   "steer_gain": 5.4,
+   "xtrack_gain": 1.5,
+   "max_steer_deg": 320.0,
+   "turn_slowdown": 0.0,
+   "armed": true,
+   "t": 15.511
+  },
+  {
+   "phase": "tracking",
+   "reason": "",
+   "fix": "RTK Float",
+   "lat": 37.426775,
+   "lon": -122.16579683,
+   "ts": 1783704674.4566135,
+   "alpha": 7.4,
+   "steer_cmd": 40.1,
+   "gas": 0.339,
+   "brake": 0.0,
+   "max_speed_mph": 5.5,
+   "lookahead_i": 49,
+   "xtrack_m": 0.75,
+   "xtrack_signed_m": 0.75,
+   "heading_deg": 226.5,
+   "heading_err_deg": -4.3,
+   "dist_to_goal_m": 34.6,
+   "steering_actual_deg": 267.4,
+   "steering_target_deg": 40.1,
+   "live_speed_mph": 5.5,
+   "lookahead_m": 3.0,
+   "steer_gain": 5.4,
+   "xtrack_gain": 1.5,
+   "max_steer_deg": 320.0,
+   "turn_slowdown": 0.0,
+   "armed": true,
+   "t": 16.031
+  },
+  {
+   "phase": "tracking",
+   "reason": "",
+   "fix": "RTK Float",
+   "lat": 37.4267855,
+   "lon": -122.1658,
+   "ts": 1783704674.9520655,
+   "alpha": -40.2,
+   "steer_cmd": -217.2,
+   "gas": 0.324,
+   "brake": 0.0,
+   "max_speed_mph": 5.5,
+   "lookahead_i": 50,
+   "xtrack_m": 0.1,
+   "xtrack_signed_m": 0.1,
+   "heading_deg": 223.7,
+   "heading_err_deg": -14.3,
+   "dist_to_goal_m": 33.7,
+   "steering_actual_deg": 138.7,
+   "steering_target_deg": -217.2,
+   "live_speed_mph": 5.3,
+   "lookahead_m": 3.0,
+   "steer_gain": 5.4,
+   "xtrack_gain": 1.5,
+   "max_steer_deg": 320.0,
+   "turn_slowdown": 0.0,
+   "armed": true,
+   "t": 16.551
+  },
+  {
+   "phase": "tracking",
+   "reason": "",
+   "fix": "RTK Float",
+   "lat": 37.426796,
+   "lon": -122.16580233,
+   "ts": 1783704675.4678457,
+   "alpha": -84.4,
+   "steer_cmd": -320.0,
+   "gas": 0.343,
+   "brake": 0.0,
+   "max_speed_mph": 5.5,
+   "lookahead_i": 52,
+   "xtrack_m": 0.59,
+   "xtrack_signed_m": -0.59,
+   "heading_deg": 146.1,
+   "heading_err_deg": -22.7,
+   "dist_to_goal_m": 32.9,
+   "steering_actual_deg": -109.2,
+   "steering_target_deg": -320.0,
+   "live_speed_mph": 5.7,
+   "lookahead_m": 3.0,
+   "steer_gain": 5.4,
+   "xtrack_gain": 1.5,
+   "max_steer_deg": 320.0,
+   "turn_slowdown": 0.0,
+   "armed": true,
+   "t": 17.07
+  },
+  {
+   "phase": "tracking",
+   "reason": "",
+   "fix": "RTK Float",
+   "lat": 37.426806,
+   "lon": -122.16580783,
+   "ts": 1783704675.9558668,
+   "alpha": -91.1,
+   "steer_cmd": -320.0,
+   "gas": 0.325,
+   "brake": 0.0,
+   "max_speed_mph": 5.5,
+   "lookahead_i": 54,
+   "xtrack_m": 1.03,
+   "xtrack_signed_m": -1.03,
+   "heading_deg": 326.7,
+   "heading_err_deg": -21.3,
+   "dist_to_goal_m": 31.9,
+   "steering_actual_deg": -306.0,
+   "steering_target_deg": -320.0,
+   "live_speed_mph": 5.4,
+   "lookahead_m": 3.0,
+   "steer_gain": 5.4,
+   "xtrack_gain": 1.5,
+   "max_steer_deg": 320.0,
+   "turn_slowdown": 0.0,
+   "armed": true,
+   "t": 17.589
+  }
+ ]
+}
