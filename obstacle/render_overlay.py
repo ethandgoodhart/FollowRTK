@@ -1,3 +1,11 @@
+#
+# render_overlay.py
+#
+# Created on July 10, 2026
+#
+# Created by Georg von Manstein
+#
+
 """
 Render the eval video with obstacle-avoidance overlays baked in: brake zone
 (green=clear, red=brake), detection boxes, and the BRAKE/CLEAR banner — the

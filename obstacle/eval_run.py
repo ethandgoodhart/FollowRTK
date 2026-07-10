@@ -1,3 +1,11 @@
+#
+# eval_run.py
+#
+# Created on July 10, 2026
+#
+# Created by Georg von Manstein
+#
+
 """
 Offline sweep of the eval video through the same Detector used by the live
 service: process every Nth frame, print each brake window, and save a few

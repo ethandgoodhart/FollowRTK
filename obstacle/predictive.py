@@ -1,3 +1,11 @@
+#
+# predictive.py
+#
+# Created on July 10, 2026
+#
+# Created by Georg von Manstein
+#
+
 """
 obstacle.predictive — track objects, predict their paths and the cart's,
 and compute HOW MUCH to brake (0..1), not just whether to stop.

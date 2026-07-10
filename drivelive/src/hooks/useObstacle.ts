@@ -1,3 +1,11 @@
+//
+// useObstacle.ts
+//
+// Created on July 10, 2026
+//
+// Created by Georg von Manstein
+//
+
 'use client';
 
 import { useState, useEffect, useRef } from 'react';

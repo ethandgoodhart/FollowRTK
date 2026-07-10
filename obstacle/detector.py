@@ -1,3 +1,11 @@
+#
+# detector.py
+#
+# Created on July 10, 2026
+#
+# Created by Georg von Manstein
+#
+
 """
 obstacle.detector — camera-based "should we brake right now?" service.
 

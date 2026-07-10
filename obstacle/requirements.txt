@@ -1,3 +1,11 @@
+#
+# requirements.txt
+#
+# Created on July 10, 2026
+#
+# Created by Georg von Manstein
+#
+
 ultralytics
 opencv-python
 aiohttp
