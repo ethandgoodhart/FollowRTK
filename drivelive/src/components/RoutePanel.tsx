@@ -81,6 +81,13 @@ export default function RoutePanel({ route, onSelectEnd, onClear, cornerCut, onC
         </p>
       )}
 
+      {/* TEMP debug readout — destination coords for route verification */}
+      {route.endPoint && (
+        <p className="text-[11px] text-amber-400 mb-2 font-mono select-all">
+          dest: {route.endPoint.lat.toFixed(6)}, {route.endPoint.lng.toFixed(6)}
+        </p>
+      )}
+
       {hasRoute && (
         <>
           <div className="w-full h-2 bg-neutral-800 rounded-full overflow-hidden mb-2">

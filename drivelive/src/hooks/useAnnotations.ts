@@ -121,7 +121,10 @@ export function useAnnotations(raw: RawAnnotations) {
       if (centerlineAsymmetry(points, pair.a.points, pair.b.points) > MAX_CENTERLINE_ASYMMETRY) continue;
       pairedConn.add(pair.a);
       pairedConn.add(pair.b);
-      connCenterLines.push({ name: pair.name, type: 'connector', points });
+      // Corridor width (boundary-to-boundary) so the containment clamp knows how
+      // far off the connector spine still counts as on-road.
+      const width = pairMetrics(pair.a.points, pair.b.points)?.avgDistance;
+      connCenterLines.push({ name: pair.name, type: 'connector', points, width });
     }
 
     // Lone connector strokes with no geometric partner: use the polyline as-is.

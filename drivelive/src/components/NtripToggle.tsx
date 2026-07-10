@@ -6,6 +6,7 @@ import { NtripStatus } from '@/lib/types';
 const PROVIDERS: { key: string; label: string }[] = [
   { key: 'pointone', label: 'Point One' },
   { key: 'rtkdata', label: 'RTKData' },
+  { key: 'crtn', label: 'CRTN' },
 ];
 
 interface Props {

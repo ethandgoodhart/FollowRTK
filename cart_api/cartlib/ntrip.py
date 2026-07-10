@@ -40,6 +40,15 @@ PROVIDERS = {
         "host": "rtk.rtkdata.com", "port": 2101, "mountpoint": "AUTO",
         "username": "rtkethangoo41d", "password": "9ce1743e4074",
     },
+    # CRTN (California Real Time Network, SOPAC/Scripps). Unlike the VRS casters
+    # above, CRTN serves individual physical base stations — no AUTO/VRS — so we
+    # pin the nearest one. SLAC (at Stanford, ~2 mi from the cart) on the Zone 3
+    # server. See http://sopac-csrc.ucsd.edu/index.php/crtn-connecting/
+    "crtn": {
+        "label": "CRTN",
+        "host": "132.239.152.4", "port": 2103, "mountpoint": "SLAC_RTCM3",
+        "username": "CRTNSTANFOEG", "password": "STANFOEGSURV",
+    },
 }
 DEFAULT_PROVIDER = "pointone"
 

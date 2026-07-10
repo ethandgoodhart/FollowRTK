@@ -506,6 +506,54 @@ function streetCorner(
   return null;
 }
 
+// Keep the route inside the drivable corridor — the hard guarantee that the
+// purple line never leaves the green/dotted boundaries (and so the cart never
+// drives off the road). Every lane/connector center line is the spine of a
+// corridor `width` wide (boundary-to-boundary), so the green boundaries sit at
+// ±width/2 from it: a point is on-road when it lies within half that width of
+// SOME center line. The upstream steps — right-lane offset, corner rounding, and
+// the straight-through-intersection apex — can each nudge a point past that edge.
+// This is the final pass: any point outside every corridor is pulled straight
+// back toward the nearest spine until it sits just inside that corridor's edge.
+// Points already in bounds (including the intended quarter-lane right offset,
+// which is only width/4 out) are returned untouched, so the line's real shape is
+// preserved and only genuine off-road excursions are corrected.
+export function clampToCorridors(
+  path: LatLng[],
+  centerLines: { points: LatLng[]; width?: number }[],
+  opts: { defaultWidth?: number; inset?: number; searchCap?: number } = {}
+): LatLng[] {
+  if (path.length < 2 || centerLines.length === 0) return path;
+  const defaultWidth = opts.defaultWidth ?? 5.0; // half-width for lines with no measured pair
+  const inset = opts.inset ?? 0.3;               // keep the line this far inside the edge (m)
+  const searchCap = opts.searchCap ?? 30;        // ignore center lines farther than this (m)
+
+  return path.map((p) => {
+    // Pick the corridor the point is most inside (smallest overshoot past its
+    // edge); a point inside ANY corridor is on-road and left alone.
+    let best: { proj: LatLng; distance: number; half: number } | null = null;
+    for (const ln of centerLines) {
+      const c = closestPointOnPolyline(p, ln.points);
+      if (!c || c.distance > searchCap) continue;
+      const half = (ln.width && ln.width > 0 ? ln.width : defaultWidth) / 2;
+      if (!best || c.distance - half < best.distance - best.half) {
+        best = { proj: c.point, distance: c.distance, half };
+      }
+    }
+    if (!best) return p; // nothing near enough to judge — don't yank it blindly
+
+    const allowed = Math.max(0, best.half - inset);
+    if (best.distance <= allowed) return p; // already inside the corridor edge
+
+    // Move from the spine toward the point until it sits exactly at the edge.
+    const t = best.distance > 0 ? allowed / best.distance : 0;
+    return {
+      lat: best.proj.lat + (p.lat - best.proj.lat) * t,
+      lng: best.proj.lng + (p.lng - best.proj.lng) * t,
+    };
+  });
+}
+
 export function totalPolylineLength(points: LatLng[]): number {
   let d = 0;
   for (let i = 1; i < points.length; i++) {

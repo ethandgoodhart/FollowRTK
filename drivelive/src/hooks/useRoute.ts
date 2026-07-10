@@ -2,7 +2,7 @@
 
 import { useReducer, useCallback, useMemo, useEffect } from 'react';
 import { LatLng, GpsPosition, GraphNode, RouteState, CenterLine } from '@/lib/types';
-import { smoothRouteTurns, totalPolylineLength, offsetToRightLane, straightenThroughConnectors } from '@/lib/geo';
+import { smoothRouteTurns, totalPolylineLength, offsetToRightLane, straightenThroughConnectors, clampToCorridors } from '@/lib/geo';
 import { findNearestNode, dijkstra } from '@/lib/graph';
 import { snapToRoute, computeRouteProgress, computeEta } from '@/lib/route-tracking';
 
@@ -135,8 +135,13 @@ export function useRoute(
     //    dividers, so we drive to the right of them); the direct intersection
     //    links stay un-offset.
     // 3) Smooth: round the direct joins (and every other corner) into arcs.
+    // 4) Clamp back inside the lane/connector corridors: the offset, corner
+    //    rounding and intersection apex above can each nudge a point past the
+    //    green boundary — this is the hard guarantee the purple line (and so the
+    //    cart) never leaves the drivable road.
     const straight = straightenThroughConnectors(state.path, laneCenterLines, connCenterLines);
-    return smoothRouteTurns(offsetToRightLane(straight, laneCenterLines), cornerCut);
+    const smoothed = smoothRouteTurns(offsetToRightLane(straight, laneCenterLines), cornerCut);
+    return clampToCorridors(smoothed, [...laneCenterLines, ...connCenterLines]);
   }, [state.path, laneCenterLines, connCenterLines, cornerCut]);
 
   const totalDistance = useMemo(() => {
