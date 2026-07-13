@@ -98,6 +98,40 @@ everything detected and readable. Last run on the cart:
 - `arm()`, `stop()`, `emergency_brake()`, `snapshot()`
 - `.gps`, `.pedals`, `.steering` — the subsystem objects
 
+## Running the autonomy on Retriever (`rflows.py` / `rpipeline.py`)
+
+The same autonomy `follow.py` runs in one hand-rolled loop can instead run as a
+[Retriever](https://retriever.build/) dataflow graph — five typed flows, each
+hardware flow owning exactly one serial port in its own worker process:
+
+```
+GpsSourceFlow @Rate(10) ──▶ FollowerFlow @Rate(12) ──▶ SteeringFlow  (ODrive)
+                                   ▲    │           ──▶ PedalFlow     (Arduino)
+                                   │    └───────────▶ TelemetryFlow ──UDP──▶ UI
+                        measured angle + e-stop feed back
+```
+
+```bash
+pip install -r requirements.txt                        # adds retriever-core (needs py3.11+)
+python3 examples/follow_retriever.py paths/loop.json            # dry-run
+python3 examples/follow_retriever.py paths/loop.json --go        # DRIVE
+```
+
+`FollowerFlow` is a straight lift of `follow.PathFollower.step()` — same Stanley
+law, same gains. `tests/test_rflows_parity.py` marches both down the same
+trajectory and asserts every actuator command matches, so they cannot silently
+diverge. `follow.py` is unchanged and remains the fallback.
+
+Two things worth knowing:
+
+- **The backend is `multiprocessing`, and that is not a preference.** It is the
+  only backend that honours `@Rate` in wall-clock time. The `in-process` backend
+  is a debug/replay surface that spins the graph as fast as it can, which on real
+  hardware means thousands of serial writes per second instead of 12.
+- **Dry-run cannot actuate.** With `armed=False` the actuator flows are never
+  built, so the ODrive and Arduino are not opened at all — it is structural, not
+  an `if armed:` check. `tests/test_rpipeline_graph.py` enforces it.
+
 ## Safety notes
 
 - The Arduino boots in **FAILSAFE** and re-trips it if the host heartbeat
