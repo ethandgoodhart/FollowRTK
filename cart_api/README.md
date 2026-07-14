@@ -115,7 +115,11 @@ GpsSourceFlow @Rate(10) ──▶ FollowerFlow @Rate(12) ──▶ SteeringFlow 
 pip install -r requirements.txt                        # adds retriever-core (needs py3.11+)
 python3 examples/follow_retriever.py paths/loop.json            # dry-run
 python3 examples/follow_retriever.py paths/loop.json --go        # DRIVE
+python3 examples/follow_retriever.py paths/loop.json --viz       # render the graph, don't drive
 ```
+
+`--viz` writes a self-contained interactive HTML of the graph (`pipe.visualize()`).
+It builds the graph without running it, so nothing is opened and nothing moves.
 
 `FollowerFlow` is a straight lift of `follow.PathFollower.step()` — same Stanley
 law, same gains. `tests/test_rflows_parity.py` marches both down the same
@@ -131,6 +135,21 @@ Two things worth knowing:
 - **Dry-run cannot actuate.** With `armed=False` the actuator flows are never
   built, so the ODrive and Arduino are not opened at all — it is structural, not
   an `if armed:` check. `tests/test_rpipeline_graph.py` enforces it.
+
+Three runtime gotchas that cost real debugging, worth knowing before you edit these:
+
+- **`step()` receives an `IOView`, not your dataclass.** Attribute access works
+  (`inp.lat`), but `dataclasses.asdict()` raises. An unmapped edge passes the value
+  atomically, so a *distinct but field-identical* input type silently arrives as
+  something that isn't that dataclass — which is why `TelemetryFlow`'s input type
+  is `DriveCmd` itself, not a lookalike.
+- **`reset()` is the lifecycle hook, not `init()`** (`init()` is a deprecated
+  alias). `reset()` runs at startup *and* again on any `Pipeline.reset()`, so the
+  device opens in the hardware flows are guarded — re-opening the Arduino mid-drive
+  would restart the heartbeat and drop the cart into FAILSAFE.
+- **`Pipeline.reset()` is not a stop.** `pipe.run(blocking=False)` returns the
+  engine; you must call `engine.stop()` to tear the workers down (which is what
+  runs `finalize()` → gas to zero, park brake, motor idled).
 
 ## Safety notes
 

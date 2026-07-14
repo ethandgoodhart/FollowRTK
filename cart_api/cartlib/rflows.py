@@ -48,7 +48,7 @@ import json
 import math
 import socket
 import time
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from typing import List, Optional
 
 from retriever import Flow, Rate, Trigger, io
@@ -154,33 +154,6 @@ class PedalState:
     failsafe: Optional[bool] = None
 
 
-@io
-@dataclass
-class TelemetryIn:
-    """Mirrors DriveCmd — field names match, so the edge needs no map."""
-    phase: Optional[str] = None
-    reason: Optional[str] = None
-    steer_deg: Optional[float] = None
-    gas: Optional[float] = None
-    brake: Optional[float] = None
-    alpha: Optional[float] = None
-    lat: Optional[float] = None
-    lon: Optional[float] = None
-    fix: Optional[str] = None
-    ts: Optional[float] = None
-    t: Optional[float] = None
-    xtrack_m: Optional[float] = None
-    xtrack_signed_m: Optional[float] = None
-    heading_deg: Optional[float] = None
-    heading_err_deg: Optional[float] = None
-    dist_to_goal_m: Optional[float] = None
-    live_speed_mph: Optional[float] = None
-    max_speed_mph: Optional[float] = None
-    steering_actual_deg: Optional[float] = None
-    steering_target_deg: Optional[float] = None
-    armed: Optional[bool] = None
-
-
 # --------------------------------------------------------------------------
 # GPS
 # --------------------------------------------------------------------------
@@ -201,13 +174,17 @@ class GpsSourceFlow(Flow[None, GpsFix]):
     def init_config(self) -> dict:
         return {"ntrip_provider": self.ntrip_provider}
 
-    def init(self) -> None:
-        self.gps = GpsReceiver()
-        self.gps.open()
-        self.ntrip = None
-        if self.ntrip_provider:
-            from .ntrip import NtripClient
-            self.ntrip = NtripClient(self.gps, provider=self.ntrip_provider).start()
+    def reset(self) -> None:
+        # reset() is the lifecycle hook: called once at startup AND again on any
+        # Pipeline.reset(). So the device open is guarded — re-opening the GPS on
+        # a state reset would be a bug. Only the speed estimator is re-zeroed.
+        if getattr(self, "gps", None) is None:
+            self.gps = GpsReceiver()
+            self.gps.open()
+            self.ntrip = None
+            if self.ntrip_provider:
+                from .ntrip import NtripClient
+                self.ntrip = NtripClient(self.gps, provider=self.ntrip_provider).start()
         self._prev: Optional[tuple] = None   # (lat, lon, ts)
         self._speed_mph = 0.0
 
@@ -268,7 +245,7 @@ class FollowerFlow(Flow[FollowIn, DriveCmd]):
                 "cfg": self.cfg_dict,
                 "armed": self.armed}
 
-    def init(self) -> None:
+    def reset(self) -> None:
         self.cfg = FollowConfig(**self.cfg_dict)
         self.cfg.gas_cap = config.effective_gas_cap(self.cfg.gas_cap)
         self.phase = "init"
@@ -286,9 +263,6 @@ class FollowerFlow(Flow[FollowIn, DriveCmd]):
         self._cum_s = 0.0
         self._last_xy: Optional[tuple] = None
         self._prev_step_ts: Optional[float] = None
-
-    def reset(self) -> None:
-        self.init()
 
     # -- helpers (ported verbatim from follow.py) --------------------------
     def _path_curvature(self, along_m: float, w: float = 2.5) -> float:
@@ -501,12 +475,16 @@ class FollowerFlow(Flow[FollowIn, DriveCmd]):
 class SteeringFlow(Flow[SteerCmd, SteerState]):
     """Owns the ODrive. Reports the measured column angle back to the follower."""
 
-    def init(self) -> None:
-        self.steering = SteeringController()
-        self.steering.connect()
-        self.enabled = self.steering.enable()
-        if not self.enabled:
-            print("[steering] FAILED to enter closed loop — not actuating", flush=True)
+    def reset(self) -> None:
+        # Guarded: reset() runs again on Pipeline.reset(), and re-opening the
+        # ODrive mid-drive would drop the motor out of closed loop.
+        if getattr(self, "steering", None) is None:
+            self.steering = SteeringController()
+            self.steering.connect()
+            self.enabled = self.steering.enable()
+            if not self.enabled:
+                print("[steering] FAILED to enter closed loop — not actuating",
+                      flush=True)
         self._last_read = 0.0
         self._actual: Optional[float] = None
 
@@ -549,10 +527,13 @@ class PedalFlow(Flow[PedalCmd, PedalState]):
     def init_config(self) -> dict:
         return {"gas_cap": self.gas_cap, "arrival_brake": self.arrival_brake}
 
-    def init(self) -> None:
-        self.pedals = PedalController(gas_cap=self.gas_cap)
-        self.pedals.open()
-        self.pedals.arm()
+    def reset(self) -> None:
+        # Guarded: re-opening the Arduino would restart the heartbeat thread and
+        # briefly drop the cart into FAILSAFE mid-drive.
+        if getattr(self, "pedals", None) is None:
+            self.pedals = PedalController(gas_cap=self.gas_cap)
+            self.pedals.open()
+            self.pedals.arm()
         self.phase = "init"
 
     def step(self, cmd: PedalCmd) -> PedalState:
@@ -580,12 +561,18 @@ class PedalFlow(Flow[PedalCmd, PedalState]):
 # telemetry
 # --------------------------------------------------------------------------
 
-class TelemetryFlow(Flow[TelemetryIn, None]):
+class TelemetryFlow(Flow[DriveCmd, None]):
     """Fire-and-forget UDP to the parent process (and anyone else listening).
 
     UDP because the flow runs in a worker process: a Python callback can't reach
     the parent's asyncio loop, and a datagram to localhost doesn't care about
     fork-vs-spawn or block the control loop if nobody is listening.
+
+    Takes DriveCmd — the follower's own output type — rather than a lookalike
+    mirror type. An unmapped edge passes the value atomically, so a distinct
+    (even field-identical) input type arrives as something that is not that
+    dataclass, and every send fails. Same-type sink is the idiom the runtime
+    expects; see the sim -> viz edge in golden-retriever's autopilot example.
     """
 
     def __init__(self, *, port: int = DEFAULT_TELEMETRY_PORT):
@@ -595,17 +582,32 @@ class TelemetryFlow(Flow[TelemetryIn, None]):
     def init_config(self) -> dict:
         return {"port": self.port}
 
-    def init(self) -> None:
-        self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    # A flow's step() receives an IOView, NOT the dataclass — attribute access
+    # works, but dataclasses.asdict() raises. So the payload is built field by
+    # field. Same names follow.py's telemetry already uses, so the UI and the
+    # drive-log tooling need no changes.
+    FIELDS = (
+        "phase", "reason", "gas", "brake", "alpha", "lat", "lon", "fix", "ts", "t",
+        "xtrack_m", "xtrack_signed_m", "heading_deg", "heading_err_deg",
+        "dist_to_goal_m", "live_speed_mph", "max_speed_mph",
+        "steering_actual_deg", "steering_target_deg", "armed",
+    )
 
-    def step(self, t: TelemetryIn) -> None:
-        if t.phase is None:
+    def reset(self) -> None:
+        if getattr(self, "sock", None) is None:
+            self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+
+    def step(self, t: DriveCmd) -> None:
+        if getattr(t, "phase", None) is None:
             return None
-        payload = {k: v for k, v in asdict(t).items() if v is not None}
-        # The UI (and the drive-log tooling) already speak follow.py's key names.
-        # Emit `steer_cmd` alongside so nothing downstream has to change.
-        if t.steer_deg is not None:
-            payload["steer_cmd"] = t.steer_deg
+        payload = {}
+        for name in self.FIELDS:
+            v = getattr(t, name, None)
+            if v is not None:
+                payload[name] = v
+        steer = getattr(t, "steer_deg", None)
+        if steer is not None:
+            payload["steer_cmd"] = steer     # follow.py's name for it
         try:
             self.sock.sendto(json.dumps(payload).encode(), ("127.0.0.1", self.port))
         except OSError:

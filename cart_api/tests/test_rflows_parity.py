@@ -102,7 +102,7 @@ def main() -> int:
 
         new = FollowerFlow(path=[list(p) for p in path],
                            cfg=asdict(cfg_new), armed=False)
-        new.init()
+        new.reset()   # reset() is the lifecycle hook the runtime calls; init() is deprecated
 
         mismatches = []
         steers: list = []

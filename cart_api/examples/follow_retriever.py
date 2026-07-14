@@ -31,7 +31,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from cartlib import config
 from cartlib.follow import FollowConfig, load_path
-from cartlib.rpipeline import run_drive
+from cartlib.rpipeline import run_drive, visualize
 
 
 def main() -> None:
@@ -56,6 +56,8 @@ def main() -> None:
                     help="control loop rate (Hz)")
     ap.add_argument("--duration", type=float, default=None,
                     help="stop after N seconds regardless of progress")
+    ap.add_argument("--viz", metavar="OUT.html", nargs="?", const="cart_graph.html",
+                    help="render the drive graph to HTML and exit (does not drive)")
     args = ap.parse_args()
 
     waypoints = load_path(args.path)
@@ -66,6 +68,13 @@ def main() -> None:
         rate_hz=args.rate,
         require_rtk=args.require_rtk,
     )
+
+    if args.viz:
+        # Renders the ARMED graph so the actuator flows and the feedback edges
+        # are visible. Builds only — nothing is opened, nothing moves.
+        out = visualize(waypoints, cfg, armed=True, path=args.viz, open_browser=True)
+        print(f"Wrote graph to {out}")
+        return
 
     eff_cap = config.effective_gas_cap(cfg.gas_cap)
     print(f"Loaded {len(waypoints)} waypoints from {args.path}")

@@ -37,7 +37,7 @@ import time
 from dataclasses import asdict
 from typing import Callable, List, Optional
 
-from retriever import Latest, Pipeline, Rate, Trigger
+from retriever import Pipeline, Rate, Trigger
 
 from . import config
 from .follow import FollowConfig
@@ -79,11 +79,17 @@ def build_pipeline(
         ) @ Rate(hz=cfg.rate_hz)
         telemetry = TelemetryFlow(port=telemetry_port) @ Trigger("phase")
 
-        pipe.connect(gps, follower, sync=Latest(), map={
+        # `.then()` is Pipeline.connect() with chaining sugar — it takes the same
+        # map=/sync= and returns the destination. sync defaults to Latest(), which
+        # is what every edge here wants, so it's left implicit.
+        #
+        # The telemetry edge is deliberately UNMAPPED (atomic whole-value), which
+        # is why TelemetryFlow's input type IS DriveCmd. A distinct lookalike type
+        # would arrive as an IOView that isn't that dataclass, and silently break.
+        gps.then(follower, map={
             "lat": "lat", "lon": "lon", "fix_type": "fix_type",
             "fix_code": "fix_code", "speed_mph": "speed_mph", "ts": "ts",
-        })
-        pipe.connect(follower, telemetry, sync=Latest())
+        }).then(telemetry)
 
         if armed:
             steering = SteeringFlow() @ Trigger("steer_deg")
@@ -91,21 +97,35 @@ def build_pipeline(
                 gas_cap=gas_cap, arrival_brake=cfg.arrival_brake,
             ) @ Trigger("gas")
 
-            pipe.connect(follower, steering, sync=Latest(), map={
+            follower.then(steering, map={
                 "steer_deg": "steer_deg", "steer_enable": "steer_enable",
                 "phase": "phase",
             })
-            pipe.connect(follower, pedals, sync=Latest(), map={
+            follower.then(pedals, map={
                 "gas": "gas", "brake": "brake", "phase": "phase",
             })
-            # Feedback: measured column angle and e-stop back into the law.
-            pipe.connect(steering, follower, sync=Latest(), map={
+            # Feedback: measured column angle (the fused-heading estimator is built
+            # on it) and e-stop, back into the law.
+            steering.then(follower, map={
                 "steering_actual_deg": "steering_actual_deg",
                 "steering_target_deg": "steering_target_deg",
             })
-            pipe.connect(pedals, follower, sync=Latest(), map={"estop": "estop"})
+            pedals.then(follower, map={"estop": "estop"})
 
     return pipe
+
+
+def visualize(waypoints: List[tuple], cfg: FollowConfig, *, armed: bool = False,
+              path: str = "cart_graph.html", open_browser: bool = False) -> str:
+    """Render the drive graph to a standalone interactive HTML file.
+
+    Builds the graph but never runs it, so nothing is opened and nothing moves —
+    safe to call with armed=True just to see the actuator flows and the feedback
+    edges that only exist in the armed graph.
+    """
+    pipe = build_pipeline(waypoints, cfg, armed=armed, name="cart_drive")
+    out = pipe.visualize(path, open_browser=open_browser)
+    return str(out)
 
 
 class TelemetryListener:
@@ -200,21 +220,15 @@ def run_drive(
         telemetry_port=telemetry_port, ntrip_provider=ntrip_provider,
     )
 
-    # The graph has no "I'm finished" signal of its own, so the parent watches
-    # the telemetry for a terminal phase and tears the pipeline down.
-    done = threading.Event()
-
-    def watch() -> None:
-        while not done.wait(0.05):
-            if listener.phase in ("done", "abort"):
-                return
-
-    watcher = threading.Thread(target=watch, daemon=True)
-    watcher.start()
-
+    # The graph has no "I'm finished" signal of its own, so the parent watches the
+    # telemetry stream for a terminal phase and stops the engine itself.
     reason = ""
+    engine = None
     try:
-        pipe.run(backend="multiprocessing", duration=duration, blocking=False)
+        # blocking=False hands back the engine; we own stopping it. (Pipeline.reset()
+        # is NOT a stop — it re-runs every flow's reset() and leaves the workers
+        # running, i.e. the actuators still being driven.)
+        engine = pipe.run(backend="multiprocessing", duration=duration, blocking=False)
         t0 = time.time()
         while True:
             if listener.phase in ("done", "abort"):
@@ -227,15 +241,15 @@ def run_drive(
     except KeyboardInterrupt:
         reason = "interrupted"
     finally:
-        done.set()
-        # Tearing the graph down runs finalize() in every worker: gas to zero,
-        # park brake if we arrived, motor idled. If a worker is wedged and never
-        # gets there, its death stops the heartbeat and the Arduino firmware
-        # brakes for us.
-        try:
-            pipe.reset()
-        except Exception:
-            pass
+        # Stopping the engine tears the workers down, which runs finalize() in
+        # each: gas to zero, park brake if we arrived, motor idled. If a worker is
+        # wedged and never gets there, its death stops the pedal heartbeat and the
+        # Arduino firmware brakes for us within 300 ms.
+        if engine is not None:
+            try:
+                engine.stop()
+            except Exception as e:
+                print(f"[drive] engine.stop() failed: {e}", flush=True)
         time.sleep(0.3)   # let finalize() land before we stop listening
         if log_path:
             write_drive_log(listener, cfg, waypoints, reason, path=log_path)
