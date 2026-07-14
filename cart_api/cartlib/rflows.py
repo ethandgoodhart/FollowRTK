@@ -263,6 +263,7 @@ class FollowerFlow(Flow[FollowIn, DriveCmd]):
         self._cum_s = 0.0
         self._last_xy: Optional[tuple] = None
         self._prev_step_ts: Optional[float] = None
+        self._dbg: dict = {}               # debug tap; see step()
 
     # -- helpers (ported verbatim from follow.py) --------------------------
     def _path_curvature(self, along_m: float, w: float = 2.5) -> float:
@@ -421,6 +422,18 @@ class FollowerFlow(Flow[FollowIn, DriveCmd]):
         target = self._st_cmd + max(-max_step, min(target - self._st_cmd, max_step))
         self._st_cmd = target
         steer_deg = target
+
+        # Debug tap: the road-wheel demand broken into its three terms plus the
+        # command shaping, which are otherwise locals and invisible to telemetry.
+        # sim/debug_follower.py reads this when stepping the flow in-process; in a
+        # worker process it is simply an unread attribute.
+        self._dbg = {
+            "curvature": curvature, "ff_deg": ff_deg, "head_deg": head_deg,
+            "cross_deg": cross_deg, "integral_deg": self._st_integral,
+            "road_deg": road_deg, "column_raw": column_raw, "column_cmd": target,
+            "fused_heading": fused, "path_bearing": path_bearing,
+            "heading_err": heading_err, "wheel_deg": wheel_deg, "dt": dt,
+        }
 
         heading_abs = fused if fused is not None else (path_bearing + wheel_deg) % 360.0
 

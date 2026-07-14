@@ -136,6 +136,30 @@ Two things worth knowing:
   built, so the ODrive and Arduino are not opened at all — it is structural, not
   an `if armed:` check. `tests/test_rpipeline_graph.py` enforces it.
 
+### Debugging the follower
+
+`sim/debug_follower.py` runs the **same** `FollowerFlow` in the main process, on a
+deterministic fake clock, and prints the control law's internals every step — the
+terms that never reach telemetry (`ff` / `head` / `cross` / `int` → `road_deg` →
+`column_raw` → `column_cmd`):
+
+```bash
+cd sim
+python3 debug_follower.py                                  # closed loop vs the sim plant
+python3 debug_follower.py --mode pipeline                  # through a real graph + pipe.step()
+python3 debug_follower.py --source replay --drive route2_notgreat3.5   # real recorded GPS
+python3 debug_follower.py --break-at 40                    # drop into pdb at step 40
+```
+
+- `--mode direct` calls `FollowerFlow.step()` in a plain loop — no Retriever runtime,
+  simplest place to breakpoint the law.
+- `--mode pipeline` drives a real 2-flow graph (Plant ↔ Follower) with `pipe.step()`,
+  the in-process stepper: same process, so breakpoints still land, but it exercises
+  the actual wiring. The two agree to ~1% (the gap is the graph's one-cycle edge
+  delay), which is a useful check that the runtime isn't changing behaviour.
+- `--source replay` feeds the **recorded** GPS from `sim/drives/` and prints the new
+  law's command next to what the old law actually commanded at that moment.
+
 Three runtime gotchas that cost real debugging, worth knowing before you edit these:
 
 - **`step()` receives an `IOView`, not your dataclass.** Attribute access works
@@ -150,6 +174,9 @@ Three runtime gotchas that cost real debugging, worth knowing before you edit th
 - **`Pipeline.reset()` is not a stop.** `pipe.run(blocking=False)` returns the
   engine; you must call `engine.stop()` to tear the workers down (which is what
   runs `finalize()` → gas to zero, park brake, motor idled).
+- **Edge types are compared by annotation TEXT.** `float | None` does not match
+  `Optional[float]` and the graph refuses to build (`IR_VAL_TYPE_MISMATCH`), even
+  though Python considers them the same type. Spell payload fields `Optional[X]`.
 
 ## Safety notes
 
