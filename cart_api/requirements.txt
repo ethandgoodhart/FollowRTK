@@ -3,3 +3,10 @@
 # its ASCII protocol, so the heavyweight `odrive`/`fibre` packages are NOT
 # needed. (pyserial 3.5 is already present system-wide on the cart Jetson.)
 pyserial>=3.5
+
+# Retriever dataflow runtime — used by cartlib/rflows.py + rpipeline.py, which
+# run the autonomy as a typed graph (see examples/follow_retriever.py).
+# Needs Python 3.11+. The legacy cartlib/follow.py loop has no such dependency,
+# so a plain `pip install pyserial` still gets you a working cart.
+retriever-core>=0.0.4
+

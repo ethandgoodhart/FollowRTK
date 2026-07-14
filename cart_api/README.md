@@ -98,6 +98,86 @@ everything detected and readable. Last run on the cart:
 - `arm()`, `stop()`, `emergency_brake()`, `snapshot()`
 - `.gps`, `.pedals`, `.steering` — the subsystem objects
 
+## Running the autonomy on Retriever (`rflows.py` / `rpipeline.py`)
+
+The same autonomy `follow.py` runs in one hand-rolled loop can instead run as a
+[Retriever](https://retriever.build/) dataflow graph — five typed flows, each
+hardware flow owning exactly one serial port in its own worker process:
+
+```
+GpsSourceFlow @Rate(10) ──▶ FollowerFlow @Rate(12) ──▶ SteeringFlow  (ODrive)
+                                   ▲    │           ──▶ PedalFlow     (Arduino)
+                                   │    └───────────▶ TelemetryFlow ──UDP──▶ UI
+                        measured angle + e-stop feed back
+```
+
+```bash
+pip install -r requirements.txt                        # adds retriever-core (needs py3.11+)
+python3 examples/follow_retriever.py paths/loop.json            # dry-run
+python3 examples/follow_retriever.py paths/loop.json --go        # DRIVE
+python3 examples/follow_retriever.py paths/loop.json --viz       # render the graph, don't drive
+```
+
+`--viz` writes a self-contained interactive HTML of the graph (`pipe.visualize()`).
+It builds the graph without running it, so nothing is opened and nothing moves.
+
+`FollowerFlow` is a straight lift of `follow.PathFollower.step()` — same Stanley
+law, same gains. `tests/test_rflows_parity.py` marches both down the same
+trajectory and asserts every actuator command matches, so they cannot silently
+diverge. `follow.py` is unchanged and remains the fallback.
+
+Two things worth knowing:
+
+- **The backend is `multiprocessing`, and that is not a preference.** It is the
+  only backend that honours `@Rate` in wall-clock time. The `in-process` backend
+  is a debug/replay surface that spins the graph as fast as it can, which on real
+  hardware means thousands of serial writes per second instead of 12.
+- **Dry-run cannot actuate.** With `armed=False` the actuator flows are never
+  built, so the ODrive and Arduino are not opened at all — it is structural, not
+  an `if armed:` check. `tests/test_rpipeline_graph.py` enforces it.
+
+### Debugging the follower
+
+`sim/debug_follower.py` runs the **same** `FollowerFlow` in the main process, on a
+deterministic fake clock, and prints the control law's internals every step — the
+terms that never reach telemetry (`ff` / `head` / `cross` / `int` → `road_deg` →
+`column_raw` → `column_cmd`):
+
+```bash
+cd sim
+python3 debug_follower.py                                  # closed loop vs the sim plant
+python3 debug_follower.py --mode pipeline                  # through a real graph + pipe.step()
+python3 debug_follower.py --source replay --drive route2_notgreat3.5   # real recorded GPS
+python3 debug_follower.py --break-at 40                    # drop into pdb at step 40
+```
+
+- `--mode direct` calls `FollowerFlow.step()` in a plain loop — no Retriever runtime,
+  simplest place to breakpoint the law.
+- `--mode pipeline` drives a real 2-flow graph (Plant ↔ Follower) with `pipe.step()`,
+  the in-process stepper: same process, so breakpoints still land, but it exercises
+  the actual wiring. The two agree to ~1% (the gap is the graph's one-cycle edge
+  delay), which is a useful check that the runtime isn't changing behaviour.
+- `--source replay` feeds the **recorded** GPS from `sim/drives/` and prints the new
+  law's command next to what the old law actually commanded at that moment.
+
+Three runtime gotchas that cost real debugging, worth knowing before you edit these:
+
+- **`step()` receives an `IOView`, not your dataclass.** Attribute access works
+  (`inp.lat`), but `dataclasses.asdict()` raises. An unmapped edge passes the value
+  atomically, so a *distinct but field-identical* input type silently arrives as
+  something that isn't that dataclass — which is why `TelemetryFlow`'s input type
+  is `DriveCmd` itself, not a lookalike.
+- **`reset()` is the lifecycle hook, not `init()`** (`init()` is a deprecated
+  alias). `reset()` runs at startup *and* again on any `Pipeline.reset()`, so the
+  device opens in the hardware flows are guarded — re-opening the Arduino mid-drive
+  would restart the heartbeat and drop the cart into FAILSAFE.
+- **`Pipeline.reset()` is not a stop.** `pipe.run(blocking=False)` returns the
+  engine; you must call `engine.stop()` to tear the workers down (which is what
+  runs `finalize()` → gas to zero, park brake, motor idled).
+- **Edge types are compared by annotation TEXT.** `float | None` does not match
+  `Optional[float]` and the graph refuses to build (`IR_VAL_TYPE_MISMATCH`), even
+  though Python considers them the same type. Spell payload fields `Optional[X]`.
+
 ## Safety notes
 
 - The Arduino boots in **FAILSAFE** and re-trips it if the host heartbeat
