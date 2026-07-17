@@ -11,6 +11,20 @@ interface Props {
   centerLines: CenterLine[];
 }
 
+// Engineering Quad. Center lines here are still routed on — they are just not
+// drawn, so the freshly mapped lane boundaries stay readable.
+const HIDE_CENTER_LINES = { minLat: 37.427, maxLat: 37.4292, minLng: -122.176, maxLng: -122.1725 };
+
+function hidden(cl: CenterLine): boolean {
+  return cl.points.some(
+    (p) =>
+      p.lat >= HIDE_CENTER_LINES.minLat &&
+      p.lat <= HIDE_CENTER_LINES.maxLat &&
+      p.lng >= HIDE_CENTER_LINES.minLng &&
+      p.lng <= HIDE_CENTER_LINES.maxLng,
+  );
+}
+
 export default function AnnotationLayers({ map, lanes, connectors, centerLines }: Props) {
   useEffect(() => {
     if (!map) return;
@@ -57,6 +71,7 @@ export default function AnnotationLayers({ map, lanes, connectors, centerLines }
     });
 
     centerLines.forEach((cl, i) => {
+      if (hidden(cl)) return;
       const srcId = `center-${i}`;
       ids.push(srcId);
       map.addSource(srcId, {

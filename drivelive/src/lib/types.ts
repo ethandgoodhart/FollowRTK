@@ -83,6 +83,18 @@ export interface NtripStatus {
   provider: string;
   label: string;
   connected: boolean;
+  last_error?: string | null;
+}
+
+// A destination pushed in from a remote client (companion app via the
+// Cloudflare tunnel). The UI drops the pin, lets useRoute plan the purple
+// route, and — when autostart is set — drives that computed route. `seq`
+// increments per message so repeating the same coordinate still triggers.
+export interface RemoteRoute {
+  lat: number;
+  lng: number;
+  autostart: boolean;
+  seq: number;
 }
 
 export interface RouteState {

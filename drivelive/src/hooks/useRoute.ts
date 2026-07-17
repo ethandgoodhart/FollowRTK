@@ -62,6 +62,20 @@ export function useRoute(
   const selectEnd = useCallback(() => dispatch({ type: 'SET_SELECTING', selecting: 'end' }), []);
   const clearRoute = useCallback(() => dispatch({ type: 'CLEAR' }), []);
 
+  // Set the destination directly (no map click) — used when a remote client
+  // pushes in a target coordinate. Snaps to the nearest lane node just like a
+  // click would, so the same purple route planning runs.
+  const setEnd = useCallback(
+    (latlng: LatLng) => {
+      const nodeId = findNearestNode(latlng, graph);
+      if (!nodeId) return;
+      const node = graph.get(nodeId);
+      if (!node) return;
+      dispatch({ type: 'SET_END', point: { lat: node.lat, lng: node.lng } });
+    },
+    [graph]
+  );
+
   // Start point IS our precise live GPS position (not snapped to the road).
   // Updates every fix; it's the exact origin the route is drawn/driven from.
   useEffect(() => {
@@ -154,6 +168,7 @@ export function useRoute(
     path,
     totalDistance,
     selectEnd,
+    setEnd,
     handleMapClick,
     clearRoute,
   };

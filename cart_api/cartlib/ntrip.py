@@ -38,7 +38,7 @@ PROVIDERS = {
     "rtkdata": {
         "label": "RTKData",
         "host": "rtk.rtkdata.com", "port": 2101, "mountpoint": "AUTO",
-        "username": "rtkethangoo41d", "password": "9ce1743e4074",
+        "username": "rtkmanstein58c", "password": "74d9151327d8",
     },
     # CRTN (California Real Time Network, SOPAC/Scripps). Unlike the VRS casters
     # above, CRTN serves individual physical base stations — no AUTO/VRS — so we
@@ -50,7 +50,7 @@ PROVIDERS = {
         "username": "CRTNSTANFOEG", "password": "STANFOEGSURV",
     },
 }
-DEFAULT_PROVIDER = "pointone"
+DEFAULT_PROVIDER = "rtkdata"
 
 # Back-compat module-level defaults (some callers/tests import these).
 NTRIP_HOST = PROVIDERS[DEFAULT_PROVIDER]["host"]
@@ -71,6 +71,7 @@ class NtripClient:
         self._cfg_lock = threading.Lock()
         self._sock: Optional[socket.socket] = None
         self._switch = threading.Event()
+        self._last_error: Optional[str] = None
         self.provider = provider
         cfg = PROVIDERS.get(provider, PROVIDERS[DEFAULT_PROVIDER])
         self.host, self.port, self.mountpoint = cfg["host"], cfg["port"], cfg["mountpoint"]
@@ -80,20 +81,33 @@ class NtripClient:
         """Switch the active correction source live. Returns False for an unknown
         provider or a no-op (already selected). Drops the current connection so
         the run loop immediately reconnects to the new caster."""
-        if provider not in PROVIDERS or provider == self.provider:
+        if provider not in PROVIDERS:
             return False
         cfg = PROVIDERS[provider]
+        sock = None
         with self._cfg_lock:
+            if provider == self.provider:
+                self._switch.set()
+                sock = self._sock
+                if sock is None:
+                    return False
+                try:
+                    sock.close()
+                except Exception:
+                    pass
+                return True
             self.provider = provider
             self.host, self.port, self.mountpoint = cfg["host"], cfg["port"], cfg["mountpoint"]
             self.username, self.password = cfg["username"], cfg["password"]
             self.connected = False
+            self._last_error = None
             self._switch.set()
-            if self._sock is not None:
-                try:
-                    self._sock.close()   # break the recv loop so we reconnect now
-                except Exception:
-                    pass
+            sock = self._sock
+        if sock is not None:
+            try:
+                sock.close()   # break the recv loop so we reconnect now
+            except Exception:
+                pass
         return True
 
     def status(self) -> dict:
@@ -103,6 +117,7 @@ class NtripClient:
                 "provider": self.provider,
                 "label": PROVIDERS.get(self.provider, {}).get("label", self.provider),
                 "connected": self.connected,
+                "last_error": self._last_error,
             }
 
     def start(self) -> "NtripClient":
@@ -113,6 +128,13 @@ class NtripClient:
 
     def stop(self) -> None:
         self._stop.set()
+        with self._cfg_lock:
+            sock = self._sock
+        if sock:
+            try:
+                sock.close()
+            except Exception:
+                pass
         if self._thread:
             self._thread.join(timeout=2)
 
@@ -124,9 +146,15 @@ class NtripClient:
         VRS casters build the virtual base at our true position (not FALLBACK)."""
         deadline = time.time() + timeout
         while time.time() < deadline and not self.gps.last_gga_raw:
-            if self._stop.is_set():
+            if self._stop.is_set() or self._switch.is_set():
                 return
             time.sleep(0.1)
+
+    def _sleep_interruptible(self, seconds: float) -> None:
+        deadline = time.time() + seconds
+        while time.time() < deadline and not self._stop.is_set() and not self._switch.is_set():
+            remaining = max(0.0, deadline - time.time())
+            time.sleep(min(0.1, remaining))
 
     def _run(self) -> None:
         # How often we echo our position back to the caster. VRS/AUTO mountpoints
@@ -144,10 +172,12 @@ class NtripClient:
                     host, port, mountpoint = self.host, self.port, self.mountpoint
                     username, password = self.username, self.password
                 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                sock.settimeout(10)
-                sock.connect((host, port))
                 with self._cfg_lock:
                     self._sock = sock
+                    self.connected = False
+                    self._last_error = None
+                sock.settimeout(10)
+                sock.connect((host, port))
                 creds = base64.b64encode(f"{username}:{password}".encode()).decode()
                 req = (
                     f"GET /{mountpoint} HTTP/1.1\r\n"
@@ -168,12 +198,16 @@ class NtripClient:
                     resp += chunk
                 header, _, remainder = resp.partition(b"\r\n\r\n")
                 if b"200" not in header:
-                    self.connected = False
-                    time.sleep(5)
+                    with self._cfg_lock:
+                        self.connected = False
+                        self._last_error = header.decode("ascii", "ignore").splitlines()[0] if header else "empty NTRIP response"
+                    self._sleep_interruptible(5)
                     continue
-                self.connected = True
-                if remainder and self.gps._ser:
-                    self.gps._ser.write(remainder)
+                with self._cfg_lock:
+                    self.connected = True
+                    self._last_error = None
+                if remainder:
+                    self.gps.write_corrections(remainder)
 
                 # Short recv timeout so a silent stream still lets us re-send GGA
                 # on schedule — the caster won't start streaming until it does.
@@ -190,17 +224,20 @@ class NtripClient:
                         data = sock.recv(4096)
                         if not data:
                             break
-                        if self.gps._ser:
-                            self.gps._ser.write(data)
+                        self.gps.write_corrections(data)
                     except socket.timeout:
                         continue
                     except OSError:
                         break   # socket closed by switch()
-            except Exception:
-                self.connected = False
+            except Exception as e:
+                with self._cfg_lock:
+                    self.connected = False
+                    if not self._stop.is_set() and not self._switch.is_set():
+                        self._last_error = str(e)
             finally:
                 with self._cfg_lock:
                     self._sock = None
+                    self.connected = False
                 if sock:
                     try:
                         sock.close()
@@ -209,4 +246,4 @@ class NtripClient:
             # A live switch reconnects immediately; otherwise back off briefly so
             # we don't hammer a flaky caster on repeated drops.
             if not self._switch.is_set():
-                time.sleep(3)
+                self._sleep_interruptible(3)

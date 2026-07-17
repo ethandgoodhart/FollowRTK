@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import mapboxgl from 'mapbox-gl';
 import { RawAnnotations, LatLng } from '@/lib/types';
 import { courseOverGround } from '@/lib/geo';
@@ -37,7 +37,7 @@ export default function DriveApp({ rawAnnotations }: Props) {
   // for routing; drawing them yellow would double-draw every connector (raw
   // blue + distorted yellow) — that was the visual regression vs live.
   const { laneBoundaries, connectorBoundaries, laneCenterLines, connCenterLines, graph } = useAnnotations(rawAnnotations);
-  const { position, isConnected, getHistory, historyVersion, follow, ntrip, sendCommand } = useGps(wsUrl);
+  const { position, isConnected, getHistory, historyVersion, follow, ntrip, sendCommand, remoteRoute } = useGps(wsUrl);
   const { speedMph, speed } = useSpeed(getHistory, historyVersion);
   const route = useRoute(graph, position, speed, laneCenterLines, connCenterLines, cornerCut);
 
@@ -47,6 +47,25 @@ export default function DriveApp({ rawAnnotations }: Props) {
   const [lockRoute, setLockRoute] = useState(true);
   const [frozenPath, setFrozenPath] = useState<LatLng[] | null>(null);
   const driving = follow?.active ?? false;
+
+  // Remote destination: when a companion app pushes a target coordinate over
+  // the tunnel, drop the pin here and let useRoute plan the same purple route a
+  // map click would. If the remote asked to start, bump autoStartToken so
+  // DriveControl fires "Drive Route" once that purple route is ready — the cart
+  // drives the exact line shown on screen, not a raw straight shot.
+  const [autoStartToken, setAutoStartToken] = useState(0);
+  const lastRemoteSeq = useRef(0);
+  useEffect(() => {
+    if (!remoteRoute || remoteRoute.seq === lastRemoteSeq.current) return;
+    lastRemoteSeq.current = remoteRoute.seq;
+    // Clear first so hasRoute drops to false until the fresh route computes;
+    // that's what gates the autostart below onto the NEW purple line.
+    route.clearRoute();
+    route.setEnd({ lat: remoteRoute.lat, lng: remoteRoute.lng });
+    if (remoteRoute.autostart) setAutoStartToken((n) => n + 1);
+    // route identity changes every render; we only want to run on a new seq.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [remoteRoute]);
   useEffect(() => {
     // Snapshot once when (locked & driving) begins; clear when either drops.
     if (lockRoute && driving) setFrozenPath((prev) => prev ?? route.path);
@@ -106,7 +125,7 @@ export default function DriveApp({ rawAnnotations }: Props) {
         cornerCut={cornerCut}
         onCornerCutChange={setCornerCut}
       />
-      <DriveControl route={route} follow={follow} speedMph={speedMph} isConnected={isConnected} sendCommand={sendCommand} lockRoute={lockRoute} onToggleLockRoute={setLockRoute} />
+      <DriveControl route={route} follow={follow} speedMph={speedMph} isConnected={isConnected} sendCommand={sendCommand} lockRoute={lockRoute} onToggleLockRoute={setLockRoute} autoStartToken={autoStartToken} />
     </div>
   );
 }

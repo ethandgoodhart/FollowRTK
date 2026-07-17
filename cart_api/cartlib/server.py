@@ -72,6 +72,14 @@ _stop_event: threading.Event | None = None
 _active_follower: PathFollower | None = None
 _drive_lock = threading.Lock()
 
+# Duplicate-drive guard: if the identical path is already being driven and the
+# drive started within this window, a second "drive" is ignored instead of
+# stopping and restarting the cart (the start/1s/restart jerk). A genuine
+# re-drive (after a stop, or a different route) is never blocked.
+_active_drive_key: tuple | None = None
+_active_drive_t: float = 0.0
+DUP_DRIVE_WINDOW_S = 4.0
+
 
 # --- GPS fix -> web shape ---------------------------------------------------
 def _to_web(fix: dict) -> dict:
@@ -262,12 +270,22 @@ def _config_snapshot(cfg: FollowConfig) -> dict:
 def start_drive(path: list, max_speed_mph: float, armed: bool, msg: dict) -> dict:
     """Begin following ``path``. Returns a status dict echoed back to the UI."""
     global _drive_thread, _stop_event, _active_follower
+    global _active_drive_key, _active_drive_t
     with _drive_lock:
-        _stop_drive_locked(emergency=False)
-
         waypoints = _coords_from_path(path)
         if len(waypoints) < 2:
             return {"ok": False, "reason": "need >=2 waypoints"}
+
+        # Ignore an identical drive that lands right on top of one already
+        # running — a duplicate command must not tear down and restart the cart.
+        key = tuple(waypoints)
+        if (_active_follower is not None and _active_drive_key == key
+                and time.time() - _active_drive_t < DUP_DRIVE_WINDOW_S):
+            print("[server] ignoring duplicate drive (same path, already driving)")
+            return {"ok": True, "duplicate": True,
+                    "note": "duplicate drive ignored (already driving this route)"}
+
+        _stop_drive_locked(emergency=False)
 
         # Can only actuate if the actuators are actually present.
         can_drive = bool(_cart and _cart.pedals and _cart.steering)
@@ -281,6 +299,8 @@ def start_drive(path: list, max_speed_mph: float, armed: bool, msg: dict) -> dic
 
         follower = PathFollower(_cart, waypoints, cfg, armed=armed)
         _active_follower = follower
+        _active_drive_key = key
+        _active_drive_t = time.time()
         _stop_event = threading.Event()
         _drive_thread = threading.Thread(
             target=_drive_loop, args=(follower, _stop_event), daemon=True)
@@ -352,8 +372,15 @@ async def _ws_handler(ws):
             elif t == "ntrip":
                 # Switch the live correction source; tell everyone the new state.
                 if _ntrip is not None:
-                    _ntrip.switch(msg.get("provider", ""))
-                    await _broadcast({"type": "ntrip", "data": _ntrip.status()})
+                    provider = str(msg.get("provider", ""))
+                    ok = _ntrip.switch(provider)
+                    status = _ntrip.status()
+                    await ws.send(json.dumps({"type": "ntrip_ack",
+                                              "data": {"ok": ok, "requested": provider, **status}}))
+                    await _broadcast({"type": "ntrip", "data": status})
+                else:
+                    await ws.send(json.dumps({"type": "ntrip_ack",
+                                              "data": {"ok": False, "reason": "NTRIP is not running"}}))
     except websockets.exceptions.ConnectionClosed:
         pass
     finally:
@@ -401,24 +428,34 @@ def _open_cart(gps_only: bool) -> Cart:
 
 def _handle_remote_command(cmd: str, data: dict) -> dict:
     """Handle commands from the Cloudflare tunnel (livepub HTTP endpoints)."""
-    if cmd == "start":
+    if cmd in ("start", "destination"):
         dest = data.get("destination")
         if not dest:
             return {"ok": False, "reason": "no destination set"}
-        fix = _cart.gps.latest if (_cart and _cart.gps) else None
-        if not fix:
-            return {"ok": False, "reason": "no GPS fix"}
-        path = [
-            {"lat": fix["lat"], "lon": fix["lon"]},
-            {"lat": dest[0], "lon": dest[1]},
-        ]
-        print(f"[server] remote start: ({fix['lat']:.6f},{fix['lon']:.6f}) -> ({dest[0]:.6f},{dest[1]:.6f})")
-        return start_drive(path, _default_max_speed_mph, True, {})
+        # Don't drive a raw straight line here. Push the destination to the
+        # drivelive UI: it drops the pin, plans the purple route along the lane
+        # network, shows it on screen, and (for "start") drives THAT computed
+        # route back to us via the normal "drive" WebSocket command. So the cart
+        # follows exactly the line the operator sees, not a naive point-to-point.
+        autostart = cmd == "start"
+        if not _clients:
+            return {"ok": False,
+                    "reason": "no drivelive UI connected — open the map so the route can be planned & shown"}
+        _broadcast_threadsafe({"type": "remote_route",
+                               "data": {"lat": dest[0], "lon": dest[1], "autostart": autostart}})
+        action = "start" if autostart else "set destination"
+        print(f"[server] remote {action} -> pushed ({dest[0]:.6f},{dest[1]:.6f}) to UI for routing "
+              f"({len(_clients)} client(s))")
+        return {"ok": True, "dispatched": True, "autostart": autostart,
+                "clients": len(_clients),
+                "note": "routing through drivelive UI (purple route)"}
 
     elif cmd == "stop":
-        emergency = bool(data.get("emergency", False))
-        stop_drive(emergency=emergency)
-        return {"ok": True, "stopped": True, "emergency": emergency}
+        # A remote stop/pause must bring the cart to a real halt: fully apply the
+        # brake and hold it, not just release the accelerator and coast. Force
+        # the emergency (full-brake) stop path regardless of the incoming flag.
+        stop_drive(emergency=True)
+        return {"ok": True, "stopped": True, "emergency": True}
 
     elif cmd == "status":
         with _drive_lock:
@@ -472,7 +509,11 @@ def main() -> None:
     ap = argparse.ArgumentParser(description="Cart <-> drivelive WebSocket bridge")
     ap.add_argument("--gps-only", action="store_true",
                     help="stream position only; don't open pedals/steering")
-    ap.add_argument("--ntrip", action="store_true", help="feed RTK corrections")
+    # RTK corrections are ON by default now; pass --no-ntrip to disable.
+    ap.add_argument("--ntrip", dest="ntrip", action="store_true", default=True,
+                    help="feed RTK corrections (default: on)")
+    ap.add_argument("--no-ntrip", dest="ntrip", action="store_false",
+                    help="disable RTK corrections")
     ap.add_argument("--max-speed", type=float, default=0.12,
                     help="default normalized gas cap for legacy clients")
     args = ap.parse_args()

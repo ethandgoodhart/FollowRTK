@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { RouteState, FollowState } from '@/lib/types';
 
 interface Props {
@@ -11,6 +11,10 @@ interface Props {
   sendCommand: (obj: object) => boolean;
   lockRoute: boolean;
   onToggleLockRoute: (value: boolean) => void;
+  // Bumped by DriveApp when a remote client asks to drive. We hold the request
+  // until the purple route has actually been planned, then fire the same drive
+  // command the operator's "Drive Route" button sends.
+  autoStartToken: number;
 }
 
 const PHASE_COLOR: Record<string, string> = {
@@ -23,7 +27,7 @@ const PHASE_COLOR: Record<string, string> = {
 const DEFAULT_MAX_SPEED_MPH = 3.5;
 const MAX_SPEED_MPH = 20;
 
-export default function DriveControl({ route, follow, speedMph, isConnected, sendCommand, lockRoute, onToggleLockRoute }: Props) {
+export default function DriveControl({ route, follow, speedMph, isConnected, sendCommand, lockRoute, onToggleLockRoute, autoStartToken }: Props) {
   const [maxSpeedMph, setMaxSpeedMph] = useState(DEFAULT_MAX_SPEED_MPH);
   const [tuning, setTuning] = useState({
     lookahead_m: 3.0,
@@ -51,6 +55,21 @@ export default function DriveControl({ route, follow, speedMph, isConnected, sen
     sendCommand({ type: 'drive', path: route.path, max_speed_mph: maxSpeedMph, current_speed_mph: speedMph, ...tuning });
   };
   const onStop = () => sendCommand({ type: 'stop' });
+
+  // Remote autostart: a companion app pushed a destination and asked to drive.
+  // We hold that request until the purple route is planned (hasRoute), the cart
+  // is linked, and nothing else is driving — then fire the identical drive
+  // command the operator's button sends, so the cart follows the purple line.
+  const handledAutoStart = useRef(0);
+  useEffect(() => {
+    if (!autoStartToken || autoStartToken === handledAutoStart.current) return;
+    if (!hasRoute || !isConnected || driving) return; // wait for the fresh route
+    handledAutoStart.current = autoStartToken;
+    onDrive();
+    // onDrive closes over the current route.path; deps intentionally omit it so
+    // we only fire when the route/connection is actually ready.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoStartToken, hasRoute, isConnected, driving]);
 
   useEffect(() => {
     if (!driving || !isConnected) return;

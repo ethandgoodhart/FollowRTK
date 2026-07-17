@@ -150,12 +150,14 @@ class GpsReceiver:
     """Background NMEA reader for the u-blox RTK receiver."""
 
     def __init__(self, port: Optional[str] = None, baud: int = config.GPS_BAUD):
-        self.port = port or config.find_gps_port()
+        self._requested_port = port
+        self.port = port
         self.baud = baud
         self._ser: Optional[serial.Serial] = None
         self._thread: Optional[threading.Thread] = None
         self._stop = threading.Event()
         self._lock = threading.Lock()
+        self._io_lock = threading.RLock()
         self._latest: Optional[dict] = None
         self._fix_count = 0
         # Allow callers/NTRIP to grab the raw serial handle to send GGA back.
@@ -163,8 +165,7 @@ class GpsReceiver:
 
     # -- lifecycle ---------------------------------------------------------
     def open(self) -> "GpsReceiver":
-        self._ser = serial.Serial(self.port, self.baud, timeout=1)
-        _configure_receiver(self._ser)
+        self._open_serial_locked()
         self._stop.clear()
         self._thread = threading.Thread(target=self._reader, daemon=True)
         self._thread.start()
@@ -178,8 +179,10 @@ class GpsReceiver:
         self._stop.set()
         if self._thread:
             self._thread.join(timeout=2)
-        if self._ser and self._ser.is_open:
-            self._ser.close()
+        with self._io_lock:
+            if self._ser and self._ser.is_open:
+                self._ser.close()
+            self._ser = None
 
     def __enter__(self) -> "GpsReceiver":
         return self.open()
@@ -210,13 +213,54 @@ class GpsReceiver:
             time.sleep(0.05)
         return self.latest
 
+    def write_corrections(self, data: bytes) -> None:
+        """Write RTCM correction bytes to the receiver, reopening the USB serial
+        port once if the device briefly disconnected/re-enumerated."""
+        if not data:
+            return
+        try:
+            with self._io_lock:
+                if not self._ser or not self._ser.is_open:
+                    self._open_serial_locked()
+                self._ser.write(data)
+        except Exception as first_error:
+            with self._io_lock:
+                self._close_serial_locked()
+                try:
+                    self._open_serial_locked()
+                    self._ser.write(data)
+                except Exception as second_error:
+                    self._close_serial_locked()
+                    raise RuntimeError(
+                        f"GPS serial write failed after reconnect: {second_error}"
+                    ) from first_error
+
     # -- internals ---------------------------------------------------------
+    def _open_serial_locked(self) -> None:
+        self.port = self._requested_port or config.find_gps_port()
+        self._ser = serial.Serial(self.port, self.baud, timeout=1)
+        _configure_receiver(self._ser)
+
+    def _close_serial_locked(self) -> None:
+        if self._ser:
+            try:
+                if self._ser.is_open:
+                    self._ser.close()
+            except Exception:
+                pass
+        self._ser = None
+
     def _reader(self) -> None:
         buf = ""
         while not self._stop.is_set():
             try:
-                if self._ser.in_waiting:
-                    buf += self._ser.read(self._ser.in_waiting).decode("ascii", "ignore")
+                with self._io_lock:
+                    if not self._ser or not self._ser.is_open:
+                        self._open_serial_locked()
+                    waiting = self._ser.in_waiting
+                    data = self._ser.read(waiting) if waiting else b""
+                if data:
+                    buf += data.decode("ascii", "ignore")
                     while "\n" in buf:
                         line, buf = buf.split("\n", 1)
                         line = line.strip()
@@ -230,4 +274,6 @@ class GpsReceiver:
                 else:
                     time.sleep(0.005)
             except Exception:
+                with self._io_lock:
+                    self._close_serial_locked()
                 time.sleep(0.2)

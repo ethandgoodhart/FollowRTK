@@ -20,24 +20,28 @@ import os
 # --------------------------------------------------------------------------
 # Each device is matched by a substring of its /dev/serial/by-id/ name.
 # These come straight from `ls /dev/serial/by-id/` on the cart:
+#   usb-Linux_..._CDC_Composite_Gadget-if02                  -> GPS bridge
 #   usb-u-blox_AG_-_www.u-blox.com_u-blox_GNSS_receiver-if00  -> GPS
 #   usb-ODrive_Robotics_ODrive_S1_0062747288A9-if00           -> steering
 #   usb-Arduino__www.arduino.cc__0042_1453130...-if00         -> pedals
 _BY_ID_DIR = "/dev/serial/by-id"
 
-GPS_ID_HINTS = ("u-blox", "GNSS")
+GPS_ID_HINTS = ("CDC_Composite_Gadget", "u-blox", "GNSS")
 ODRIVE_ID_HINTS = ("ODrive",)
 ARDUINO_ID_HINTS = ("Arduino",)
 
 # Fallback raw ports if the by-id symlinks are unavailable for some reason.
-GPS_FALLBACK = "/dev/ttyACM0"
+# GPS should normally be found by the stable u-blox /dev/serial/by-id link.
+# Set FOLLOWRTK_GPS_PORT=/dev/tty... only for intentionally custom wiring.
+GPS_FALLBACK = None
+GPS_BRIDGE = "/dev/gps-bridge"
 ODRIVE_FALLBACK = "/dev/ttyACM1"
 ARDUINO_FALLBACK = "/dev/ttyACM2"
 
 # --------------------------------------------------------------------------
 # Baud rates
 # --------------------------------------------------------------------------
-GPS_BAUD = 115200       # u-blox after configure (NMEA over USB CDC)
+GPS_BAUD = int(os.getenv("FOLLOWRTK_GPS_BAUD", "38400"))  # Pi bridge/u-blox UART baud
 ARDUINO_BAUD = 115200   # pedal_control.ino — 115200 8N1, newline terminated
 ODRIVE_BAUD = 115200    # ODrive USB-CDC ASCII protocol (baud is nominal over CDC)
 
@@ -125,7 +129,7 @@ def mph_from_gas(gas: float) -> float:
 # --------------------------------------------------------------------------
 # Port resolution
 # --------------------------------------------------------------------------
-def _resolve_by_id(hints, fallback):
+def _resolve_by_id(hints, fallback, *, allow_any_acm: bool = True):
     """Return the first /dev/serial/by-id link whose name matches a hint.
 
     Resolves the symlink to its real /dev/ttyACMx target. Falls back to the
@@ -140,13 +144,24 @@ def _resolve_by_id(hints, fallback):
             return os.path.realpath(os.path.join(_BY_ID_DIR, name))
     if fallback and os.path.exists(fallback):
         return fallback
-    # Last resort: any ttyACM at all.
+    if not allow_any_acm:
+        hint_text = " or ".join(hints)
+        raise RuntimeError(
+            f"no serial device matching {hint_text!r} in {_BY_ID_DIR}; "
+            "check the GPS USB connection or set FOLLOWRTK_GPS_PORT"
+        )
+    # Last resort for non-GPS devices: any ttyACM at all.
     acm = sorted(glob.glob("/dev/ttyACM*"))
     return acm[0] if acm else fallback
 
 
 def find_gps_port() -> str:
-    return _resolve_by_id(GPS_ID_HINTS, GPS_FALLBACK)
+    override = os.getenv("FOLLOWRTK_GPS_PORT")
+    if override:
+        return override
+    if os.path.exists(GPS_BRIDGE):
+        return GPS_BRIDGE
+    return _resolve_by_id(GPS_ID_HINTS, GPS_FALLBACK, allow_any_acm=False)
 
 
 def find_odrive_port() -> str:

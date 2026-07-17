@@ -14,8 +14,36 @@ interface Props {
   onSwitch: (provider: string) => void;
 }
 
+function describeNtripError(error?: string | null): string | null {
+  if (!error) return null;
+  const e = error.toLowerCase();
+  if (e.includes('input/output error') || e.includes('write failed')) {
+    return 'GPS serial write failed';
+  }
+  if (e.includes('timed out') || e.includes('timeout')) {
+    return 'Caster timed out';
+  }
+  if (e.includes('401') || e.includes('unauthorized')) {
+    return 'Login rejected';
+  }
+  if (e.includes('404') || e.includes('sourcetable')) {
+    return 'Mountpoint rejected';
+  }
+  if (e.includes('connection refused')) {
+    return 'Caster refused connection';
+  }
+  if (e.includes('name or service') || e.includes('temporary failure')) {
+    return 'Caster DNS failed';
+  }
+  return error.length > 42 ? `${error.slice(0, 39)}...` : error;
+}
+
 export default function NtripToggle({ ntrip, onSwitch }: Props) {
   const active = ntrip?.provider ?? null;
+  const errorDescription = describeNtripError(ntrip?.last_error);
+  const statusText = ntrip
+    ? (ntrip.connected ? 'live' : (errorDescription ? 'error' : 'connecting...'))
+    : 'off';
 
   return (
     <div className="w-64 rounded-xl bg-neutral-900/90 backdrop-blur-md p-2.5 text-sm shadow-lg border border-neutral-800">
@@ -29,8 +57,11 @@ export default function NtripToggle({ ntrip, onSwitch }: Props) {
               ntrip?.connected ? 'bg-green-400 shadow-[0_0_6px_#4f4]' : 'bg-red-500 shadow-[0_0_6px_#f44]'
             }`}
           />
-          <span className={`text-[10px] ${ntrip?.connected ? 'text-green-400' : 'text-red-400'}`}>
-            {ntrip ? (ntrip.connected ? 'live' : 'connecting…') : 'off'}
+          <span
+            className={`text-[10px] ${ntrip?.connected ? 'text-green-400' : 'text-red-400'}`}
+            title={ntrip?.last_error ?? undefined}
+          >
+            {statusText}
           </span>
         </span>
       </div>
@@ -54,6 +85,14 @@ export default function NtripToggle({ ntrip, onSwitch }: Props) {
           );
         })}
       </div>
+      {errorDescription && !ntrip?.connected && (
+        <div
+          className="mt-2 truncate px-1 text-[11px] text-red-300"
+          title={ntrip?.last_error ?? undefined}
+        >
+          {errorDescription}
+        </div>
+      )}
     </div>
   );
 }

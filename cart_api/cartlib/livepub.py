@@ -108,6 +108,10 @@ def start_live_publisher(get_fix: Callable[[], Optional[dict]]) -> None:
                 if lat is not None and lon is not None:
                     _pending_destination = (float(lat), float(lon))
                     print(f"[livepub] destination set: {_pending_destination}")
+                    # Push the pin to the drivelive UI right away so the operator
+                    # sees the destination + planned purple route before starting.
+                    if _command_handler:
+                        _command_handler("destination", {"destination": _pending_destination})
                     self._send_json({"ok": True, "lat": lat, "lon": lon})
                 else:
                     self._send_json({"ok": False, "reason": "need lat and lon"})

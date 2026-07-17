@@ -92,7 +92,8 @@ class FollowConfig:
     arrival_creep_mph: float = 1.0    # floor speed kept until inside goal_radius
     arrival_brake: float = 0.30       # brake pot held once arrived (full stop & park)
     max_crosstrack_m: float = 6.0     # abort if we stray this far off path
-    gps_max_age_s: float = 2.5        # stop if fix older than this
+    gps_max_age_s: float = 0.3        # stop if usable GPS is absent this long
+    rtk_loss_grace_s: float = 0.3     # stop if required RTK is absent this long
     require_rtk: bool = False         # require RTK Fixed/Float to drive
     rate_hz: float = 15.0
 
@@ -122,6 +123,8 @@ class PathFollower:
         # closed-loop speed control state
         self._speed_integral: float = 0.0
         self._prev_speed_ts: Optional[float] = None
+        self._gps_loss_since: Optional[float] = None
+        self._rtk_loss_since: Optional[float] = None
 
     # -- helpers -----------------------------------------------------------
     def _apply(self, gas: float, brake: float, steer_deg: Optional[float]) -> None:
@@ -140,6 +143,13 @@ class PathFollower:
         if self.armed and self.cart.pedals:
             self.cart.pedals.set_gas(0.0)
             self.cart.pedals.set_brake(brake)
+
+    def _pause_for_signal(self, reason: str, fix=None) -> dict:
+        """Keep the drive alive during a short GPS/RTK dropout, but command no
+        throttle while we wait for the signal to recover or time out."""
+        self.state.reason = reason
+        self._apply(gas=0.0, brake=0.05, steer_deg=None)
+        return self._telemetry(fix, None, 0.0, brake=0.05)
 
     def _cross_rate(self, cross: float, now: float) -> float:
         """d(signed cross-track)/dt — the heading-free damping signal."""
@@ -184,14 +194,36 @@ class PathFollower:
             self.state.phase = "abort"
             self._stop("E-STOP engaged")
             return self._telemetry(fix, None, 0.0)
-        if not fix or (time.time() - fix["ts"]) > c.gps_max_age_s:
-            self.state.phase = "abort"
-            self._stop("GPS fix lost/stale")
-            return self._telemetry(fix, None, 0.0)
+        now = time.time()
+        gps_ok = bool(
+            fix
+            and fix.get("fix_code", 0) > 0
+            and fix.get("lat") is not None
+            and fix.get("lon") is not None
+            and (now - fix["ts"]) <= c.gps_max_age_s
+        )
+        if not gps_ok:
+            age = (now - fix["ts"]) if fix and "ts" in fix else None
+            if self._gps_loss_since is None:
+                self._gps_loss_since = now - max(age or 0.0, 0.0)
+            lost_for = now - self._gps_loss_since
+            if lost_for >= c.gps_max_age_s:
+                self.state.phase = "abort"
+                self._stop(f"GPS fix lost/stale for {lost_for:.2f}s")
+                return self._telemetry(fix, None, 0.0)
+            return self._pause_for_signal(f"GPS dropout {lost_for:.2f}s", fix)
+        self._gps_loss_since = None
+
         if c.require_rtk and fix["fix_code"] not in (4, 5):
-            self.state.phase = "abort"
-            self._stop(f"not RTK (fix={fix['fix_type']})")
-            return self._telemetry(fix, None, 0.0)
+            if self._rtk_loss_since is None:
+                self._rtk_loss_since = now
+            lost_for = now - self._rtk_loss_since
+            if lost_for >= c.rtk_loss_grace_s:
+                self.state.phase = "abort"
+                self._stop(f"not RTK for {lost_for:.2f}s (fix={fix['fix_type']})")
+                return self._telemetry(fix, None, 0.0)
+            return self._pause_for_signal(f"RTK dropout {lost_for:.2f}s (fix={fix['fix_type']})", fix)
+        self._rtk_loss_since = None
 
         pos = (fix["lat"], fix["lon"])
 
