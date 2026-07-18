@@ -92,8 +92,10 @@ class FollowConfig:
     arrival_creep_mph: float = 1.0    # floor speed kept until inside goal_radius
     arrival_brake: float = 0.30       # brake pot held once arrived (full stop & park)
     max_crosstrack_m: float = 6.0     # abort if we stray this far off path
-    gps_max_age_s: float = 0.3        # stop if usable GPS is absent this long
-    rtk_loss_grace_s: float = 0.3     # stop if required RTK is absent this long
+    # The Pi Zero GPS bridge delivers 10 Hz fixes but occasionally batches
+    # them up to ~0.5 s late; keep the watchdog well clear of that jitter.
+    gps_max_age_s: float = 1.5        # stop if usable GPS is absent this long
+    rtk_loss_grace_s: float = 1.5     # stop if required RTK is absent this long
     require_rtk: bool = False         # require RTK Fixed/Float to drive
     rate_hz: float = 15.0
 
