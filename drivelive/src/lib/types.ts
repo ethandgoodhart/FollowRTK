@@ -123,6 +123,7 @@ export interface FollowState {
   live_speed_mph?: number;
   lookahead_m?: number;
   steer_gain?: number;
+  steer_trim_deg?: number;
   xtrack_gain?: number;
   max_steer_deg?: number;
   turn_slowdown?: number;
@@ -135,4 +136,67 @@ export interface FollowState {
   heading_gain?: number;
   dist_to_goal_m?: number;
   armed?: boolean;
+}
+
+// --- perception -------------------------------------------------------------
+// One tracked object, in the CART frame: metres forward and metres right of the
+// cart origin. Deliberately not lat/lon — the minimap answers "what is around
+// me right now", which needs no map and no GPS fix, so it keeps working in
+// exactly the conditions where the operator most wants it.
+export interface PerceptionTrack {
+  id: number;
+  cls: string;
+  group: 'vru' | 'vehicle' | string;
+  forward_m: number;
+  lateral_m: number;   // + = right of the cart
+  vf_ms: number;       // velocity relative to the cart, forward component
+  vl_ms: number;       // ... and rightward component
+  speed_ms: number;
+  width_m: number;
+  radius_m: number;    // uncertainty + half-width: the blob the policy avoids
+  confirmed: boolean;
+  moving: boolean;
+  coasting: boolean;   // predicted, not currently detected (occluded/blind zone)
+  clipped: boolean;    // feet below the frame: range is an upper bound
+  conflict: boolean;   // this track is limiting (or would limit) our speed
+  conf: number;
+}
+
+export interface PerceptionConflict {
+  track_id: number;
+  cls: string;
+  station_m: number;
+  time_s: number;
+  gap_m: number;
+  closing_ms: number;
+  v_safe_mph: number;
+}
+
+export interface PerceptionDecision {
+  v_allowed_mph: number;
+  reason: string;
+  limiting_track_id: number | null;
+  emergency: boolean;
+  degraded: boolean;
+  layer: 'clear' | 'nominal' | 'reflex' | 'degraded' | string;
+  conflicts: PerceptionConflict[];
+}
+
+export interface PerceptionState {
+  ts: number;
+  // True when the decision is computed but NOT applied to the cart. The minimap
+  // says so loudly: an operator must never mistake a proposal for the reason
+  // the cart just slowed down.
+  shadow: boolean;
+  detector_hz: number;
+  frame_age_s: number;
+  range_m: number;             // outer ring of the minimap
+  fov_deg: number;             // camera horizontal field of view
+  blind_zone_m: number;        // nearest ground the camera can resolve
+  corridor_half_w_m: number;
+  reflex_range_m: number;
+  stopping_distance_m: number;
+  speed_mph: number;
+  decision: PerceptionDecision;
+  tracks: PerceptionTrack[];
 }

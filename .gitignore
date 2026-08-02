@@ -16,6 +16,12 @@ __pycache__/
 
 # cart runtime artifacts
 cart_api/last_drive.json
+cart_api/brake_char/
+cart_api/stop_tests/
+# Detector weights and TensorRT engines: multi-MB, re-downloadable, and the
+# .engine files are only valid for the exact TensorRT/GPU they were built on.
+*.pt
+*.engine
 
 # build artifacts
 *.tsbuildinfo

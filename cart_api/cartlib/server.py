@@ -57,14 +57,20 @@ _loop: asyncio.AbstractEventLoop | None = None
 _clients: set = set()
 _cart: Cart | None = None
 _ntrip = None  # NtripClient when corrections are running; lets the UI switch source
+# PerceptionService when --percept is on, else None. Every drive reads it, so
+# it is deliberately a module global rather than threaded through the UI
+# commands: a camera and a model take seconds to load and must not be opened
+# per drive. None means "no perception", which the follower treats as "no
+# opinion on speed" -- exactly the behaviour today.
+_percept = None
 _default_max_speed = 0.12
 _default_max_speed_mph = 4.0
 
 MAX_UI_SPEED_MPH = 20.0
-# Cross-track recovery usually wants a gentle turn radius, but the slider is
-# allowed all the way to the rack's mechanical limit (±320° column) so tight
-# maneuvers are possible. Above ~110° the cart can carve tight enough to
-# overshoot the line and limit-cycle — that's on the operator to tune.
+# Cross-track recovery usually wants a gentle turn radius. The default follower
+# caps near normal driving angles, but the slider is allowed all the way to the
+# rack's mechanical limit (±320° column) so tight maneuvers remain possible.
+# Above ~110° the cart can carve tight enough to overshoot the line and weave.
 MAX_UI_STEER_DEG = 320.0
 
 _drive_thread: threading.Thread | None = None
@@ -79,6 +85,13 @@ _drive_lock = threading.Lock()
 _active_drive_key: tuple | None = None
 _active_drive_t: float = 0.0
 DUP_DRIVE_WINDOW_S = 4.0
+
+# Manual (PS5/tool) commands share this process so it remains the sole owner of
+# the serial devices. A stale client gets a full-brake stop within 300 ms.
+_manual_active = False
+_manual_owner = None
+_manual_last_cmd = 0.0
+MANUAL_TIMEOUT_S = 0.30
 
 
 # --- GPS fix -> web shape ---------------------------------------------------
@@ -126,6 +139,16 @@ async def _broadcast(obj: dict) -> None:
 def _broadcast_threadsafe(obj: dict) -> None:
     if _loop is not None:
         asyncio.run_coroutine_threadsafe(_broadcast(obj), _loop)
+
+
+def broadcast_perception(payload: dict) -> None:
+    """Push one perception frame to the UI minimap.
+
+    Public because the perception loop runs in its own thread (it is paced by
+    the camera, not by the GPS pump) and needs a thread-safe way in. Building
+    the payload is cartlib.percept.telemetry's job; this only posts it.
+    """
+    _broadcast_threadsafe({"type": "perception", "data": payload})
 
 
 # --- drive control ----------------------------------------------------------
@@ -232,6 +255,7 @@ def _follow_config_from_msg(msg: dict, max_speed_mph: float) -> FollowConfig:
         live_speed_mph=_float_setting(msg, "current_speed_mph", 0.0, 0.0, MAX_UI_SPEED_MPH),
         lookahead_m=_float_setting(msg, "lookahead_m", FollowConfig.lookahead_m, 0.3, 4.0),
         steer_gain=_float_setting(msg, "steer_gain", FollowConfig.steer_gain, 0.5, 8.0),
+        steer_trim_deg=_float_setting(msg, "steer_trim_deg", FollowConfig.steer_trim_deg, -40.0, 40.0),
         xtrack_gain=_float_setting(msg, "xtrack_gain", FollowConfig.xtrack_gain, 0.0, 5.0),
         heading_gain=_float_setting(msg, "heading_gain", FollowConfig.heading_gain, 0.0, 5.0),
         max_steer_deg=_float_setting(msg, "max_steer_deg", FollowConfig.max_steer_deg, 10.0, MAX_UI_STEER_DEG),
@@ -247,6 +271,7 @@ def tune_active_follower(msg: dict) -> dict:
         cfg.live_speed_mph = _float_setting(msg, "current_speed_mph", cfg.live_speed_mph, 0.0, MAX_UI_SPEED_MPH)
         cfg.lookahead_m = _float_setting(msg, "lookahead_m", cfg.lookahead_m, 0.3, 4.0)
         cfg.steer_gain = _float_setting(msg, "steer_gain", cfg.steer_gain, 0.5, 8.0)
+        cfg.steer_trim_deg = _float_setting(msg, "steer_trim_deg", cfg.steer_trim_deg, -40.0, 40.0)
         cfg.xtrack_gain = _float_setting(msg, "xtrack_gain", cfg.xtrack_gain, 0.0, 5.0)
         cfg.heading_gain = _float_setting(msg, "heading_gain", cfg.heading_gain, 0.0, 5.0)
         cfg.max_steer_deg = _float_setting(msg, "max_steer_deg", cfg.max_steer_deg, 10.0, MAX_UI_STEER_DEG)
@@ -260,6 +285,7 @@ def _config_snapshot(cfg: FollowConfig) -> dict:
         "live_speed_mph": cfg.live_speed_mph,
         "lookahead_m": cfg.lookahead_m,
         "steer_gain": cfg.steer_gain,
+        "steer_trim_deg": cfg.steer_trim_deg,
         "xtrack_gain": cfg.xtrack_gain,
         "heading_gain": cfg.heading_gain,
         "max_steer_deg": cfg.max_steer_deg,
@@ -297,7 +323,8 @@ def start_drive(path: list, max_speed_mph: float, armed: bool, msg: dict) -> dic
             if not _cart.steering.enable():
                 return {"ok": False, "reason": "steering failed to enter closed-loop"}
 
-        follower = PathFollower(_cart, waypoints, cfg, armed=armed)
+        follower = PathFollower(_cart, waypoints, cfg, armed=armed,
+                                percept=_percept)
         _active_follower = follower
         _active_drive_key = key
         _active_drive_t = time.time()
@@ -338,6 +365,51 @@ def stop_drive(emergency: bool = False) -> None:
         _stop_drive_locked(emergency=emergency)
 
 
+def _stop_manual_locked(emergency: bool) -> None:
+    global _manual_active, _manual_owner
+    if not _manual_active:
+        return
+    if _cart:
+        if emergency:
+            _cart.emergency_brake()
+        else:
+            _cart.stop()
+        if _cart.steering:
+            _cart.steering.idle()
+    _manual_active = False
+    _manual_owner = None
+
+
+def manual_command(msg: dict, owner) -> dict:
+    """Apply one short-lived manual control command from a local client."""
+    global _manual_active, _manual_owner, _manual_last_cmd
+    with _drive_lock:
+        if not (_cart and _cart.pedals and _cart.steering):
+            return {"ok": False, "reason": "cart actuators unavailable"}
+        if _manual_owner is not None and _manual_owner is not owner:
+            return {"ok": False, "reason": "manual control already in use"}
+        if _active_follower is not None:
+            _stop_drive_locked(emergency=False)
+        if not _manual_active:
+            _cart.arm()
+            if not _cart.steering.enable():
+                return {"ok": False, "reason": "steering failed to enter closed-loop"}
+            _manual_active = True
+            _manual_owner = owner
+
+        gas = _float_setting(msg, "gas", 0.0, 0.0, config.GLOBAL_SPEED_LIMIT)
+        brake = _float_setting(msg, "brake", 0.0, 0.0, config.BRAKE_POT_MAX)
+        steer = _float_setting(
+            msg, "steer_deg", 0.0, config.STEERING_MIN_DEG, config.STEERING_MAX_DEG)
+        if brake > 0.02:
+            gas = 0.0
+        _cart.pedals.set_gas(gas)
+        _cart.pedals.set_brake(brake)
+        _cart.steering.set_angle(steer)
+        _manual_last_cmd = time.monotonic()
+        return {"ok": True}
+
+
 # --- websocket handling -----------------------------------------------------
 async def _ws_handler(ws):
     _clients.add(ws)
@@ -366,9 +438,15 @@ async def _ws_handler(ws):
             elif t == "stop":
                 emergency = bool(msg.get("emergency", False))
                 stop_drive(emergency=emergency)
+                with _drive_lock:
+                    _stop_manual_locked(emergency=emergency)
                 await ws.send(json.dumps({"type": "drive_ack",
                                           "data": {"ok": True, "stopped": True,
                                                    "emergency": emergency}}))
+            elif t == "manual":
+                status = manual_command(msg, ws)
+                if not status.get("ok"):
+                    await ws.send(json.dumps({"type": "manual_ack", "data": status}))
             elif t == "ntrip":
                 # Switch the live correction source; tell everyone the new state.
                 if _ntrip is not None:
@@ -384,6 +462,9 @@ async def _ws_handler(ws):
     except websockets.exceptions.ConnectionClosed:
         pass
     finally:
+        with _drive_lock:
+            if _manual_owner is ws:
+                _stop_manual_locked(emergency=True)
         _clients.discard(ws)
 
 
@@ -392,6 +473,11 @@ async def _gps_pump() -> None:
     last_ntrip = None
     last_ntrip_t = 0.0
     while True:
+        with _drive_lock:
+            if (_manual_active
+                    and time.monotonic() - _manual_last_cmd > MANUAL_TIMEOUT_S):
+                print("[server] manual command timed out -- emergency braking")
+                _stop_manual_locked(emergency=True)
         fix = _cart.gps.latest if (_cart and _cart.gps) else None
         if fix and fix.get("ts") != last_ts:
             last_ts = fix["ts"]
@@ -466,8 +552,69 @@ def _handle_remote_command(cmd: str, data: dict) -> dict:
     return {"ok": False, "reason": f"unknown command: {cmd}"}
 
 
+def _start_perception(args):
+    """Open the camera and the detector, or return None and say why.
+
+    A perception failure must never stop the cart from being drivable. The
+    system worked without a camera yesterday and it works without one now; the
+    only thing lost is the speed cap, and the follower already treats a missing
+    cap as "no opinion" rather than as zero. So every failure here is a printed
+    warning and a None, not an exception into the server's startup path.
+    """
+    from .percept import calib as calib_mod
+    from .percept.policy import PolicyConfig, reflex_protected_speed_mph
+    from .percept.service import PerceptionService
+
+    try:
+        cam, calib = calib_mod.load_camera(args.percept_calib)
+    except Exception as e:
+        print(f"[percept] calibration unusable, perception disabled: {e}")
+        return None
+    print(calib_mod.describe(cam, calib))
+
+    live = args.percept_live
+    if live and not calib_mod.mount_measured(calib):
+        # Refusing here is the whole point of the measured flag. Live mode is
+        # the mode where a wrong range becomes a wrong speed on a real cart.
+        print("[percept] --percept-live refused: the mount geometry has not "
+              "been measured, so the ranges it would brake on are guesses. "
+              "Run tools/percept_ground_calib.py --write first. Falling back "
+              "to shadow mode.")
+        live = False
+
+    cfg = PolicyConfig()
+    if live:
+        guaranteed = reflex_protected_speed_mph(cfg)
+        if cfg.max_speed_mph > guaranteed + 0.05:
+            print(f"[percept] NOTE: max_speed_mph is {cfg.max_speed_mph:.1f} "
+                  f"but at {cfg.decel_emergency_ms2:.1f} m/s2 the reflex layer "
+                  f"only guarantees a stop from {guaranteed:.1f} mph. Above "
+                  f"that speed the cart depends on seeing an obstacle before "
+                  f"it enters the blind zone.")
+
+    try:
+        svc = PerceptionService(
+            cam=cam, cfg=cfg, weights=args.percept_model,
+            imgsz=args.percept_imgsz, conf=args.percept_conf,
+            shadow=not live, publish=broadcast_perception,
+            cap_width=cam.width, cap_height=cam.height,
+            cap_fps=calib_mod.capture_fps(calib),
+            cam_device=args.percept_device)
+        print(f"[percept] loading {args.percept_model} @ {args.percept_imgsz} "
+              f"(this takes a few seconds) ...")
+        svc.start()
+    except Exception as e:
+        print(f"[percept] could not start, perception disabled: {e}")
+        return None
+
+    mode = "LIVE (capping speed)" if live else "SHADOW (watching only)"
+    print(f"[percept] running in {mode}")
+    return svc
+
+
 async def _main_async(args) -> None:
-    global _loop, _cart, _ntrip, _default_max_speed, _default_max_speed_mph
+    global _loop, _cart, _ntrip, _percept
+    global _default_max_speed, _default_max_speed_mph
     _loop = asyncio.get_running_loop()
     _default_max_speed = args.max_speed
     _default_max_speed_mph = max(1.0, min(config.mph_from_gas(args.max_speed), MAX_UI_SPEED_MPH))
@@ -486,6 +633,9 @@ async def _main_async(args) -> None:
         _ntrip = ntrip
         print(f"[server] NTRIP corrections started (source: {ntrip.status()['label']})")
 
+    if args.percept:
+        _percept = _start_perception(args)
+
     print(f"[server] WebSocket bridge on ws://localhost:{WS_PORT}")
     print("[server] open the drivelive UI, click Set Start/End, then Drive Route.")
     try:
@@ -499,6 +649,12 @@ async def _main_async(args) -> None:
         # command the emergency brake here; a normal Ctrl-C/script exit should
         # not floor the brake actuator.
         stop_drive(emergency=False)
+        with _drive_lock:
+            _stop_manual_locked(emergency=False)
+        if _percept:
+            # Release the V4L2 stream. Being killed with it open is what leaves
+            # the camera wedged until somebody replugs the USB.
+            _percept.stop()
         if ntrip:
             ntrip.stop()
         if _cart:
@@ -516,7 +672,23 @@ def main() -> None:
                     help="disable RTK corrections")
     ap.add_argument("--max-speed", type=float, default=0.12,
                     help="default normalized gas cap for legacy clients")
+    # Perception. Off unless asked for, and watching-only unless asked twice:
+    # --percept runs the camera and feeds the minimap, --percept-live is the
+    # separate decision to let it touch the cart's speed.
+    ap.add_argument("--percept", action="store_true",
+                    help="run the pedestrian/vehicle perception stack")
+    ap.add_argument("--percept-live", action="store_true",
+                    help="let perception cap the speed (default: shadow only)")
+    ap.add_argument("--percept-calib", default=None,
+                    help="calibration JSON (default calibration/front_camera.json)")
+    ap.add_argument("--percept-device", type=int, default=0,
+                    help="/dev/videoN for the front camera")
+    ap.add_argument("--percept-model", default="yolo11m.pt")
+    ap.add_argument("--percept-imgsz", type=int, default=960)
+    ap.add_argument("--percept-conf", type=float, default=0.35)
     args = ap.parse_args()
+    if args.percept_live:
+        args.percept = True
     try:
         asyncio.run(_main_async(args))
     except KeyboardInterrupt:

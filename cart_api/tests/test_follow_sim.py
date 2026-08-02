@@ -143,15 +143,15 @@ def main():
     # 2. left turn -> negative steer
     def left_expect(t):
         check("tracking", t["phase"] == "tracking", t["phase"])
-        check("alpha negative (target left of heading)", t["alpha"] < -1, str(t["alpha"]))
-        check("steer NEGATIVE for left turn", t["steer_cmd"] < -1, str(t["steer_cmd"]))
+        check("alpha negative (target left of heading)", t["alpha"] < -0.5, str(t["alpha"]))
+        check("steer NEGATIVE for left turn", t["steer_cmd"] < -0.5, str(t["steer_cmd"]))
     left = run_case("LEFT TURN", turning_path(-1), left_expect)
 
     # 3. right turn -> positive steer
     def right_expect(t):
         check("tracking", t["phase"] == "tracking", t["phase"])
-        check("alpha positive (target right of heading)", t["alpha"] > 1, str(t["alpha"]))
-        check("steer POSITIVE for right turn", t["steer_cmd"] > 1, str(t["steer_cmd"]))
+        check("alpha positive (target right of heading)", t["alpha"] > 0.5, str(t["alpha"]))
+        check("steer POSITIVE for right turn", t["steer_cmd"] > 0.5, str(t["steer_cmd"]))
     right = run_case("RIGHT TURN", turning_path(+1), right_expect)
 
     # 4. gas backs off in a turn vs straight cruise

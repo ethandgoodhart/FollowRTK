@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { GpsPosition, FollowState, NtripStatus, RemoteRoute } from '@/lib/types';
+import { GpsPosition, FollowState, NtripStatus, RemoteRoute, PerceptionState } from '@/lib/types';
 
 const MAX_HISTORY = 500;
 
@@ -11,6 +11,7 @@ export function useGps(wsUrl: string) {
   const [follow, setFollow] = useState<FollowState | null>(null);
   const [ntrip, setNtrip] = useState<NtripStatus | null>(null);
   const [remoteRoute, setRemoteRoute] = useState<RemoteRoute | null>(null);
+  const [perception, setPerception] = useState<PerceptionState | null>(null);
   const historyRef = useRef<GpsPosition[]>([]);
   const remoteSeqRef = useRef(0);
   const [historyVersion, setHistoryVersion] = useState(0);
@@ -67,6 +68,8 @@ export function useGps(wsUrl: string) {
           setFollow({ ...(msg.data as FollowState), active: true });
         } else if (msg.type === 'follow_end') {
           setFollow({ ...(msg.data as FollowState), active: false });
+        } else if (msg.type === 'perception') {
+          setPerception(msg.data as PerceptionState);
         } else if (msg.type === 'remote_route') {
           // A remote client (companion app) picked a destination. Drop the pin
           // + plan the purple route in the UI, and drive it if autostart is set.
@@ -96,5 +99,5 @@ export function useGps(wsUrl: string) {
     };
   }, [wsUrl]);
 
-  return { position, isConnected, getHistory, historyVersion, follow, ntrip, sendCommand, remoteRoute };
+  return { position, isConnected, getHistory, historyVersion, follow, ntrip, sendCommand, remoteRoute, perception };
 }

@@ -1,0 +1,45 @@
+{
+  "name": "front",
+  "device": "/dev/video0",
+  "hardware": "Global Shutter Camera 32e4:0234 (1920x1200 MJPG, up to 90 fps)",
+
+  "intrinsics": {
+    "measured": true,
+    "source": "PRODUCTION/calibration/cameras/REAL_front_intrinsics.json",
+    "method": "ChArUco 7x10 25mm/18mm DICT_5X5_1000, 62 views, 2026-05-20",
+    "rms_reprojection_error_px": 0.17217709135621925,
+    "calibrated_width": 640,
+    "calibrated_height": 480,
+    "fx": 427.9462668329433,
+    "fy": 427.07675500115397,
+    "cx": 316.95398853680877,
+    "cy": 247.47619942431572,
+    "dist": [
+      0.03780731903742179,
+      -0.052907627495843046,
+      0.0007149492431333365,
+      -0.00010074676212741734,
+      0.009001394418216667
+    ],
+    "note": "Calibrated on the old 3-camera PVC rig, where the front camera was /dev/video4. The current rig has two cameras of the SAME model (32e4:0234) on different USB ports, so these numbers describe the model, not necessarily this exact unit. Unit-to-unit spread across the three PRODUCTION calibrations was fx 425-428 and cx 307-321 at 640 wide, i.e. under 1% in focal length. That is well inside the ranging error budget; the mount geometry below is what actually needs measuring."
+  },
+
+  "capture": {
+    "width": 1600,
+    "height": 1200,
+    "fps": 90,
+    "note": "1600x1200 is chosen to MATCH THE CALIBRATED 4:3 ASPECT. Intrinsics are scaled by 1600/640 = 1200/480 = 2.5. This assumes the 640x480 mode is the full sensor field downscaled rather than a crop -- an assumption an outdoor scale-match test could not confirm or refute (the test scene was a blown-out empty road with no usable texture). The ground calibration below is what settles it: if the assumption is wrong, the fitted ranges will not match the tape measure at BOTH near and far markers, and percept_ground_calib.py reports exactly that."
+  },
+
+  "mount": {
+    "measured": false,
+    "source": "PLACEHOLDER -- run tools/percept_ground_calib.py",
+    "height_m": 1.45,
+    "pitch_deg": 6.0,
+    "yaw_deg": 0.0,
+    "offset_forward_m": 1.6,
+    "offset_lateral_m": 0.0,
+    "pitch_sigma_deg": 1.0,
+    "note": "PRODUCTION has NO ground-plane extrinsics for this camera. Its extrinsics file is camera-to-camera on the old PVC rig, with the ego origin defined AT the front lens and every pitch and roll set to zero by assumption. Monocular ranging needs lens height above the ground and downward tilt, and neither exists anywhere in PRODUCTION. Until measured=true, every range this stack produces is a guess."
+  }
+}

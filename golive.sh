@@ -20,6 +20,13 @@ cd "$(dirname "$0")"
 WEB_DIR="drivelive"
 WEB_LOG="$PWD/web-ui.log"
 ENV_LOCAL="$WEB_DIR/.env.local"
+WEB_PORT=3001
+
+existing_web_pids() {
+  ps -eo pid=,args= \
+    | awk -v pat="$PWD/$WEB_DIR/node_modules/.bin/next dev --port $WEB_PORT" \
+        '$0 !~ /awk/ && index($0, pat) {print $1}'
+}
 
 # --- ensure the web UI has a Mapbox token ---------------------------------
 TOKEN="${NEXT_PUBLIC_MAPBOX_TOKEN:-${MAPBOX_TOKEN:-}}"
@@ -39,7 +46,22 @@ if [ ! -d "$WEB_DIR/node_modules" ]; then
 fi
 
 # --- start the web UI in the background ------------------------------------
-echo "[golive] starting drivelive web UI -> http://localhost:3001  (log: $WEB_LOG)"
+if ss -ltn "sport = :$WEB_PORT" | grep -q LISTEN; then
+  OLD_WEB_PIDS="$(existing_web_pids | xargs || true)"
+  if [ -n "$OLD_WEB_PIDS" ]; then
+    echo "[golive] replacing stale drivelive web UI on port $WEB_PORT (pid(s): $OLD_WEB_PIDS)"
+    kill $OLD_WEB_PIDS 2>/dev/null || true
+    sleep 1
+  fi
+fi
+
+if ss -ltn "sport = :$WEB_PORT" | grep -q LISTEN; then
+  echo "[golive] ERROR: port $WEB_PORT is already in use by another process:" >&2
+  ss -ltnp "sport = :$WEB_PORT" >&2 || true
+  exit 1
+fi
+
+echo "[golive] starting drivelive web UI -> http://localhost:$WEB_PORT  (log: $WEB_LOG)"
 ( cd "$WEB_DIR" && npm run dev ) > "$WEB_LOG" 2>&1 &
 WEB_PID=$!
 

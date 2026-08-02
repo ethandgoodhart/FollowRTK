@@ -63,7 +63,7 @@ def load_path(path_file: str) -> List[geo.LatLon]:
 
 @dataclass
 class FollowConfig:
-    lookahead_m: float = 2.0          # cross-track correction lookahead distance
+    lookahead_m: float = 4.0          # cross-track correction lookahead distance
     gas_cap: float = config.FSD_GAS_LIMIT   # hard ceiling the controller may push to
     max_speed_mph: float = 3.0        # target cruise speed (closed-loop setpoint)
     live_speed_mph: float = 0.0       # GPS-derived speed currently shown in UI
@@ -75,15 +75,16 @@ class FollowConfig:
     speed_i_max: float = 35.0         # clamp on the error integral (mph*s)
     brake_kp: float = 0.08            # brake pot per mph of overspeed
     brake_deadband_mph: float = 0.5   # tolerate this much overspeed before braking
-    steer_gain: float = 1.3           # deg steering per deg cross-track correction
-    xtrack_gain: float = 1.5          # multiplier on signed cross-track error
-    heading_gain: float = 3.0         # D-gain: deg steer per deg of (cross-rate)
+    steer_gain: float = 1.8           # deg steering per deg cross-track correction
+    steer_trim_deg: float = 0.0       # added to command; positive biases right
+    xtrack_gain: float = 1.0          # multiplier on signed cross-track error
+    heading_gain: float = 1.2         # D-gain: deg steer per deg of (cross-rate)
                                       # heading error — the damping that stops the
                                       # weave/overshoot. See step()'s heading_err.
     heading_min_speed_mph: float = 0.5  # below this, heading estimate is unreliable
     steer_sign: float = 1.0           # hardware steering sign convention
-    max_steer_deg: float = 320.0      # clamp on commanded column angle
-    turn_slowdown: float = 0.0        # gas *= 1/(1+turn_slowdown*|steer|/max_steer)
+    max_steer_deg: float = 95.0       # clamp on commanded column angle
+    turn_slowdown: float = 1.5        # gas *= 1/(1+turn_slowdown*|steer|/max_steer)
     goal_radius_m: float = 1.5        # within this of last point => arrived
     # Final-approach deceleration: ease the speed setpoint down to a crawl over
     # arrival_slowdown_m so we glide to the goal instead of cruising flat-out
@@ -108,9 +109,17 @@ class FollowState:
 
 class PathFollower:
     def __init__(self, cart: Cart, path: List[geo.LatLon],
-                 cfg: Optional[FollowConfig] = None, armed: bool = False):
+                 cfg: Optional[FollowConfig] = None, armed: bool = False,
+                 percept=None):
         self.cart = cart
         self.path = path
+        # Optional cartlib.percept.service.PerceptionService. The follower's
+        # ONLY interaction with it is to hand it a pose and read back one
+        # number, so a fault in perception can slow the cart or be ignored, but
+        # can never steer it. In shadow mode the number comes back None and
+        # nothing here changes at all.
+        self.percept = percept
+        self.percept_mph: Optional[float] = None
         self.cfg = cfg or FollowConfig()
         self.cfg.gas_cap = config.effective_gas_cap(self.cfg.gas_cap)
         self.armed = armed             # False => dry-run (no actuator output)
@@ -297,7 +306,7 @@ class PathFollower:
         pull_deg = math.degrees(math.atan2(c.xtrack_gain * cross, max(c.lookahead_m, 0.5)))
         align_deg = c.heading_gain * heading_err
         correction_deg = pull_deg + align_deg
-        raw_steer_deg = c.steer_sign * c.steer_gain * correction_deg
+        raw_steer_deg = c.steer_sign * c.steer_gain * correction_deg + c.steer_trim_deg
         steer_deg = max(-c.max_steer_deg, min(raw_steer_deg, c.max_steer_deg))
 
         # Map needle = the path bearing leaned by the wheel angle, 1:1 — so the
@@ -326,6 +335,24 @@ class PathFollower:
         if dist_to_goal < c.arrival_slowdown_m:
             frac = dist_to_goal / max(c.arrival_slowdown_m, 0.1)
             target_mph = max(c.arrival_creep_mph, c.max_speed_mph * frac)
+
+        # --- perception speed cap ---
+        # The entire perception stack reduces to this: a pose out, one speed in,
+        # combined by min. It cannot raise the setpoint, cannot touch steering,
+        # and cannot reach the pedals except through the same PI loop every
+        # other setpoint goes through. None means "no opinion" -- shadow mode,
+        # or a stale/unhealthy perception thread -- and leaves the cart exactly
+        # as it drives today.
+        self.percept_mph = None
+        if self.percept is not None:
+            try:
+                self.percept.set_context(pos, path_bearing, c.live_speed_mph,
+                                         self.path)
+                self.percept_mph = self.percept.v_allowed_mph
+            except Exception as e:      # perception must never abort a drive
+                print(f"[follow] perception error (ignored): {e}")
+            if self.percept_mph is not None:
+                target_mph = min(target_mph, self.percept_mph)
 
         speed_error = target_mph - c.live_speed_mph          # + => want to speed up
         ff_gas = config.gas_for_mph(target_mph)               # open-loop ballpark
@@ -383,6 +410,11 @@ class PathFollower:
             "gas": round(gas, 3),
             "brake": round(brake, 3),
             "max_speed_mph": round(self.cfg.max_speed_mph, 1),
+            # What perception granted, or null when it is not granting anything
+            # (shadow mode / unhealthy). Shown in the DRIVE panel so the reason
+            # for a slowdown is visible next to the gas and brake that caused it.
+            "percept_mph": (round(self.percept_mph, 2)
+                            if self.percept_mph is not None else None),
             "lookahead_i": look_i,
             "xtrack_m": round(xtrack, 2),
             "xtrack_signed_m": round(cross, 2) if cross is not None else None,
@@ -394,6 +426,7 @@ class PathFollower:
             "live_speed_mph": round(self.cfg.live_speed_mph, 1),
             "lookahead_m": round(self.cfg.lookahead_m, 2),
             "steer_gain": round(self.cfg.steer_gain, 2),
+            "steer_trim_deg": round(self.cfg.steer_trim_deg, 1),
             "xtrack_gain": round(self.cfg.xtrack_gain, 2),
             "max_steer_deg": round(self.cfg.max_steer_deg, 1),
             "turn_slowdown": round(self.cfg.turn_slowdown, 2),

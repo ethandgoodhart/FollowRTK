@@ -89,7 +89,9 @@ def _ubx_cfg_valset(keys_values: list[tuple[int, bytes]]) -> bytes:
     return _UBX_SYNC + msg + _ubx_checksum(msg)
 
 
-def _configure_receiver(ser: serial.Serial) -> None:
+def _configure_receiver(ser: serial.Serial) -> bool:
+    """Push nav-rate/message config to the receiver. Returns False if the
+    downlink is dead (read-only bridge), so callers can stop retrying."""
     meas_period_ms = int(1000 / NAV_RATE_HZ)
     msg_rates: list[tuple[int, bytes]] = [
         (_CFG_RATE_MEAS, meas_period_ms.to_bytes(2, "little")),
@@ -107,11 +109,19 @@ def _configure_receiver(ser: serial.Serial) -> None:
         for key in outputs.values():
             msg_rates.append((key, b"\x00"))
 
-    ser.write(_ubx_cfg_valset(msg_rates))
-    ser.flush()
+    # The Pi USB-gadget bridge is receive-only (u-blox -> host); host -> receiver
+    # bytes never drain and the write blocks forever. Treat a failed config as
+    # non-fatal so we still get the NMEA stream (RTK corrections won't reach the
+    # receiver over such a link — that needs a direct u-blox USB connection).
+    try:
+        ser.write(_ubx_cfg_valset(msg_rates))
+        ser.flush()
+    except Exception:
+        return False
     time.sleep(0.25)
     if ser.in_waiting:
         ser.read(ser.in_waiting)
+    return True
 
 
 def _parse_gga(line: str) -> Optional[dict]:
@@ -160,6 +170,14 @@ class GpsReceiver:
         self._io_lock = threading.RLock()
         self._latest: Optional[dict] = None
         self._fix_count = 0
+        # Set False once the downlink to the receiver proves dead (read-only Pi
+        # bridge). Keeps NTRIP from re-blocking the I/O lock on every RTCM chunk,
+        # which starved the reader from 10 Hz down to 0.1 Hz.
+        self.corrections_supported = True
+        self._write_failures = 0
+        # Once the UBX config write proves impossible, stop retrying it: every
+        # reopen would otherwise burn a full write_timeout inside the I/O lock.
+        self._config_supported = True
         # Allow callers/NTRIP to grab the raw serial handle to send GGA back.
         self.last_gga_raw: Optional[str] = None
 
@@ -218,11 +236,16 @@ class GpsReceiver:
         port once if the device briefly disconnected/re-enumerated."""
         if not data:
             return
+        if not self.corrections_supported:
+            raise RuntimeError(
+                "receiver downlink is read-only — RTCM corrections cannot be "
+                "delivered (u-blox must be connected directly by USB)")
         try:
             with self._io_lock:
                 if not self._ser or not self._ser.is_open:
                     self._open_serial_locked()
                 self._ser.write(data)
+                self._write_failures = 0
         except Exception as first_error:
             with self._io_lock:
                 self._close_serial_locked()
@@ -231,6 +254,12 @@ class GpsReceiver:
                     self._ser.write(data)
                 except Exception as second_error:
                     self._close_serial_locked()
+                    self._write_failures += 1
+                    if self._write_failures >= 2:
+                        self.corrections_supported = False
+                        print("[gps] downlink to receiver is dead after "
+                              f"{self._write_failures} attempts; disabling RTCM "
+                              "writes so they stop stalling the NMEA reader")
                     raise RuntimeError(
                         f"GPS serial write failed after reconnect: {second_error}"
                     ) from first_error
@@ -238,8 +267,16 @@ class GpsReceiver:
     # -- internals ---------------------------------------------------------
     def _open_serial_locked(self) -> None:
         self.port = self._requested_port or config.find_gps_port()
-        self._ser = serial.Serial(self.port, self.baud, timeout=1)
-        _configure_receiver(self._ser)
+        # write_timeout matters: on a read-only bridge an unbounded write blocks
+        # the whole startup path (see _configure_receiver).
+        self._ser = serial.Serial(self.port, self.baud, timeout=1, write_timeout=3)
+        if self._config_supported:
+            if not _configure_receiver(self._ser):
+                self._config_supported = False
+                self.corrections_supported = False
+                print("[gps] receiver config write failed — link is read-only. "
+                      f"Receiver stays at its default rate (not {NAV_RATE_HZ} Hz) "
+                      "and RTCM corrections are disabled.")
 
     def _close_serial_locked(self) -> None:
         if self._ser:

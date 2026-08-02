@@ -30,12 +30,13 @@ const MAX_SPEED_MPH = 20;
 export default function DriveControl({ route, follow, speedMph, isConnected, sendCommand, lockRoute, onToggleLockRoute, autoStartToken }: Props) {
   const [maxSpeedMph, setMaxSpeedMph] = useState(DEFAULT_MAX_SPEED_MPH);
   const [tuning, setTuning] = useState({
-    lookahead_m: 3.0,
-    steer_gain: 5.4,
-    xtrack_gain: 1.5,
-    heading_gain: 3.0,
-    max_steer_deg: 320,
-    turn_slowdown: 0.0,
+    lookahead_m: 4.0,
+    steer_gain: 1.8,
+    steer_trim_deg: 0,
+    xtrack_gain: 1.0,
+    heading_gain: 1.2,
+    max_steer_deg: 95,
+    turn_slowdown: 1.5,
   });
   const hasRoute = route.path.length >= 2;
   const driving = follow?.active ?? false;
@@ -116,6 +117,7 @@ export default function DriveControl({ route, follow, speedMph, isConnected, sen
         <div className="mb-1 text-sm font-semibold uppercase tracking-wide text-neutral-200">Steering tune</div>
         <TuneSlider label="lookahead" description="how far ahead it aims — higher = smoother & wider, lower = sharper & twitchier" suffix="m" value={tuning.lookahead_m} min={0.3} max={4} step={0.1} digits={1} onChange={(v) => updateTune('lookahead_m', v)} />
         <TuneSlider label="steer gain" description="overall steering strength — higher turns the wheel harder for the same error" value={tuning.steer_gain} min={0.5} max={8} step={0.1} digits={1} onChange={(v) => updateTune('steer_gain', v)} />
+        <TuneSlider label="steer trim" description="+ steers right, - steers left — use this if it holds one side of the lane" suffix="deg" value={tuning.steer_trim_deg} min={-40} max={40} step={1} digits={0} onChange={(v) => updateTune('steer_trim_deg', v)} />
         <TuneSlider label="centering" description="how hard it pulls back when off to one side of the route line" value={tuning.xtrack_gain} min={0} max={5} step={0.1} digits={1} onChange={(v) => updateTune('xtrack_gain', v)} />
         <TuneSlider label="straighten" description="damps the heading so it stops weaving — higher = steadier, lower = lets it turn sharper" value={tuning.heading_gain} min={0} max={5} step={0.1} digits={1} onChange={(v) => updateTune('heading_gain', v)} />
         <TuneSlider label="max steer" description="hard cap on how far the wheel can turn — above ~110° it carves too tight to recover from and tends to overshoot" suffix="deg" value={tuning.max_steer_deg} min={10} max={320} step={1} digits={0} onChange={(v) => updateTune('max_steer_deg', v)} />
