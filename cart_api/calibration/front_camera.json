@@ -32,14 +32,14 @@
   },
 
   "mount": {
-    "measured": false,
-    "source": "PLACEHOLDER -- run tools/percept_ground_calib.py",
-    "height_m": 1.45,
-    "pitch_deg": 6.0,
+    "measured": true,
+    "source": "Tape measure on the cart, 2026-08-16: 5.85 ft lens centre to ground, 15 deg down.",
+    "height_m": 1.78308,
+    "pitch_deg": 15.0,
     "yaw_deg": 0.0,
     "offset_forward_m": 1.6,
     "offset_lateral_m": 0.0,
-    "pitch_sigma_deg": 1.0,
-    "note": "PRODUCTION has NO ground-plane extrinsics for this camera. Its extrinsics file is camera-to-camera on the old PVC rig, with the ego origin defined AT the front lens and every pitch and roll set to zero by assumption. Monocular ranging needs lens height above the ground and downward tilt, and neither exists anywhere in PRODUCTION. Until measured=true, every range this stack produces is a guess."
+    "pitch_sigma_deg": 1.5,
+    "note": "PRODUCTION has NO ground-plane extrinsics for this camera -- its extrinsics file is camera-to-camera on the old PVC rig with the ego origin AT the front lens and every pitch and roll zero by assumption. So height and pitch here come from a direct measurement on the current rig. Height (5.85 ft = 1.78308 m) is a tape reading and is solid. Pitch is a 15 deg eyeball/inclinometer reading, hence pitch_sigma_deg 1.5: at 20 m a 1.5 deg pitch error moves the range by roughly 15%, which is why the policy carries a pitch-uncertainty margin instead of trusting this number exactly. Verify both against cones with tools/percept_ground_calib.py --fit-focal before leaning on long-range numbers. offset_forward_m 1.6 is still an estimate of lens-to-front-bumper and only shifts ranges by a constant."
   }
 }

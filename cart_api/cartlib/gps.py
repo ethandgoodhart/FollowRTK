@@ -113,9 +113,11 @@ def _configure_receiver(ser: serial.Serial) -> bool:
     # bytes never drain and the write blocks forever. Treat a failed config as
     # non-fatal so we still get the NMEA stream (RTK corrections won't reach the
     # receiver over such a link — that needs a direct u-blox USB connection).
+    # No ser.flush() here: tcdrain is not covered by write_timeout and can
+    # block indefinitely if the bridge stalls; the sleep below is enough for
+    # the config to reach the receiver.
     try:
         ser.write(_ubx_cfg_valset(msg_rates))
-        ser.flush()
     except Exception:
         return False
     time.sleep(0.25)
