@@ -199,4 +199,10 @@ export interface PerceptionState {
   speed_mph: number;
   decision: PerceptionDecision;
   tracks: PerceptionTrack[];
+  // Live mount, so the UI sliders track what perception is actually using.
+  height_m?: number;
+  pitch_deg?: number;
+  // Downscaled JPEG with boxes + modelled horizon, base64. Absent when the
+  // camera is not running.
+  preview_jpeg?: string;
 }

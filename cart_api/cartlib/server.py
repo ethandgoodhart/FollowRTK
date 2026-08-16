@@ -410,6 +410,13 @@ def manual_command(msg: dict, owner) -> dict:
         return {"ok": True}
 
 
+def apply_camera_mount(msg: dict) -> dict:
+    """Live-tune perception camera height/pitch from the UI sliders."""
+    if _percept is None:
+        return {"ok": False, "reason": "perception is not running"}
+    return _percept.set_mount(msg.get("height_m"), msg.get("pitch_deg"))
+
+
 # --- websocket handling -----------------------------------------------------
 async def _ws_handler(ws):
     _clients.add(ws)
@@ -418,6 +425,8 @@ async def _ws_handler(ws):
             await ws.send(json.dumps({"type": "position", "data": _to_web(_cart.gps.latest)}))
         if _ntrip is not None:
             await ws.send(json.dumps({"type": "ntrip", "data": _ntrip.status()}))
+        if _percept is not None:
+            await ws.send(json.dumps({"type": "camera", "data": _percept.mount_snapshot()}))
         async for raw in ws:
             try:
                 msg = json.loads(raw)
@@ -459,6 +468,11 @@ async def _ws_handler(ws):
                 else:
                     await ws.send(json.dumps({"type": "ntrip_ack",
                                               "data": {"ok": False, "reason": "NTRIP is not running"}}))
+            elif t == "camera_mount":
+                status = apply_camera_mount(msg)
+                await ws.send(json.dumps({"type": "camera_mount_ack", "data": status}))
+                if status.get("ok"):
+                    await _broadcast({"type": "camera", "data": status})
     except websockets.exceptions.ConnectionClosed:
         pass
     finally:

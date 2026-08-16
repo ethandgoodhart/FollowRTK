@@ -207,7 +207,11 @@ class NtripClient:
                     self.connected = True
                     self._last_error = None
                 if remainder:
-                    self.gps.write_corrections(remainder)
+                    try:
+                        self.gps.write_corrections(remainder)
+                    except Exception as e:
+                        with self._cfg_lock:
+                            self._last_error = str(e)
 
                 # Short recv timeout so a silent stream still lets us re-send GGA
                 # on schedule — the caster won't start streaming until it does.
@@ -224,7 +228,16 @@ class NtripClient:
                         data = sock.recv(4096)
                         if not data:
                             break
-                        self.gps.write_corrections(data)
+                        try:
+                            self.gps.write_corrections(data)
+                            with self._cfg_lock:
+                                self._last_error = None
+                        except Exception as e:
+                            # Caster is still live; a GPS serial stall is not
+                            # an NTRIP drop. Keep streaming so we recover the
+                            # moment the downlink drains again.
+                            with self._cfg_lock:
+                                self._last_error = str(e)
                     except socket.timeout:
                         continue
                     except OSError:

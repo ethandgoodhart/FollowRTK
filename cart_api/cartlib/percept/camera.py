@@ -23,6 +23,15 @@ Two things learned the hard way and encoded here:
   * ONLY ONE PROCESS MAY HOLD THE DEVICE. A second opener does not get an
     error, it gets ten-second ``select()`` timeouts, which look exactly like a
     hung model load. ``fuser -v /dev/video0`` is the diagnostic.
+
+  * AN ADVERTISED MODE IS NOT A WORKING MODE. ``v4l2-ctl`` lists 1600x1200 at
+    90 fps, and asking for it delivers *nothing at all* -- not slow frames,
+    zero frames, with the same 10 s select() timeouts as a wedged device. Both
+    cameras share one USB hub and the bandwidth is not there. 30 fps at the
+    same resolution is solid. So the requested rate is treated as a wish:
+    ``open()`` proves it with a real frame and steps down the ladder if it
+    cannot, because a perception stack that silently fails to start is worse
+    than one running at a third of the frame rate.
 """
 
 from __future__ import annotations
@@ -55,19 +64,51 @@ class CameraStream:
         self.error: Optional[str] = None
 
     # -- lifecycle --------------------------------------------------------
-    def open(self) -> "CameraStream":
+    def _configure(self, fps: int):
         import cv2
 
         cap = cv2.VideoCapture(self.device, cv2.CAP_V4L2)
         cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
         cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
         cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
-        cap.set(cv2.CAP_PROP_FPS, self.fps)
+        cap.set(cv2.CAP_PROP_FPS, fps)
         cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-        if not cap.isOpened():
+        return cap
+
+    def _fps_ladder(self):
+        """Requested rate first, then the rates this sensor also advertises."""
+        rates = [self.fps] + [r for r in (60, 30, 15) if r < self.fps]
+        return rates
+
+    def open(self) -> "CameraStream":
+        cap = None
+        for i, fps in enumerate(self._fps_ladder()):
+            cap = self._configure(fps)
+            if not cap.isOpened():
+                cap.release()
+                raise RuntimeError(
+                    f"cannot open /dev/video{self.device} — is something else "
+                    f"holding it? check: fuser -v /dev/video{self.device}")
+            # One real frame is the only proof the mode works. A read that
+            # fails here has already burned its 10 s select() timeout, which
+            # is why the ladder is short and starts at what was asked for.
+            ok, _ = cap.read()
+            if ok:
+                if fps != self.fps:
+                    print(f"[camera] {self.width}x{self.height}@{self.fps} "
+                          f"delivered no frames (USB bandwidth) — running at "
+                          f"{fps} fps instead")
+                    self.fps = fps
+                break
+            cap.release()
+            cap = None
+        if cap is None:
             raise RuntimeError(
-                f"cannot open /dev/video{self.device} — is something else "
-                f"holding it? check: fuser -v /dev/video{self.device}")
+                f"/dev/video{self.device} opened but delivered no frames at "
+                f"{self.width}x{self.height} at any of "
+                f"{self._fps_ladder()} fps. Either another process holds it "
+                f"(fuser -v /dev/video{self.device}) or the device is wedged "
+                f"— unplug and replug its USB.")
         self._cap = cap
         self._thread = threading.Thread(target=self._run, name="camera",
                                         daemon=True)
@@ -100,19 +141,12 @@ class CameraStream:
         select() timeout. A reopen fixes the second case outright and the first
         one often enough to be worth trying before giving up on the drive.
         """
-        import cv2
-
         try:
             self._cap.release()
         except Exception:
             pass
         time.sleep(0.5)
-        cap = cv2.VideoCapture(self.device, cv2.CAP_V4L2)
-        cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
-        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
-        cap.set(cv2.CAP_PROP_FPS, self.fps)
-        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        cap = self._configure(self.fps)
         if not cap.isOpened():
             return False
         self._cap = cap

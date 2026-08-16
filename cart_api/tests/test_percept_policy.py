@@ -351,6 +351,7 @@ def test_the_decision_explains_itself():
     d = evaluate([mk_track(0.0, 9.0, tid=42)], STRAIGHT, north(), cfg())
     assert d.limiting_track_id == 42
     assert "42" in d.reason
+    assert "ft" in d.reason
     js = d.to_dict()
     assert js["limiting_track_id"] == 42 and js["conflicts"]
 

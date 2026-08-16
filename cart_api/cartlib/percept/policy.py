@@ -56,6 +56,7 @@ from .track import GROUP_MAX_SPEED, EgoPose, Track
 
 MPS_TO_MPH = 2.2369363
 MPH_TO_MPS = 1.0 / MPS_TO_MPH
+M_TO_FT = 3.280839895
 
 
 @dataclass
@@ -140,7 +141,7 @@ class Conflict:
 
     def describe(self) -> str:
         return (f"track #{self.track_id} ({self.cls}) blocks the route at "
-                f"{self.station_m:.1f} m in {self.time_s:.1f} s "
+                f"{self.station_m * M_TO_FT:.0f} ft in {self.time_s:.1f} s "
                 f"-> {self.v_safe_ms * MPS_TO_MPH:.1f} mph")
 
 
@@ -517,8 +518,8 @@ def evaluate(tracks: Sequence[Track],
             v_allowed_mph=0.0, layer="reflex", emergency=True,
             limiting_track_id=hit.id,
             reason=(f"REFLEX: {hit.cls} #{hit.id} at "
-                    f"{hit.last_forward_m:.1f} m, "
-                    f"{hit.last_lateral_m:+.1f} m lateral"))
+                    f"{hit.last_forward_m * M_TO_FT:.0f} ft, "
+                    f"{hit.last_lateral_m * M_TO_FT:+.0f} ft lateral"))
 
     # L2 cap.
     cap_mph, cap_reason = health_cap_mph(tracks, cfg, detector_ok, frame_age_s)

@@ -17,8 +17,9 @@ interface Props {
 function describeNtripError(error?: string | null): string | null {
   if (!error) return null;
   const e = error.toLowerCase();
-  if (e.includes('input/output error') || e.includes('write failed')) {
-    return 'GPS serial write failed';
+  if (e.includes('not forwarding') || e.includes('would block')
+      || e.includes('backing off') || e.includes('serial write')) {
+    return 'Pi not forwarding RTCM';
   }
   if (e.includes('timed out') || e.includes('timeout')) {
     return 'Caster timed out';
@@ -41,8 +42,9 @@ function describeNtripError(error?: string | null): string | null {
 export default function NtripToggle({ ntrip, onSwitch }: Props) {
   const active = ntrip?.provider ?? null;
   const errorDescription = describeNtripError(ntrip?.last_error);
+  const healthy = Boolean(ntrip?.connected) && !errorDescription;
   const statusText = ntrip
-    ? (ntrip.connected ? 'live' : (errorDescription ? 'error' : 'connecting...'))
+    ? (healthy ? 'live' : (errorDescription ? 'error' : 'connecting...'))
     : 'off';
 
   return (
@@ -54,11 +56,11 @@ export default function NtripToggle({ ntrip, onSwitch }: Props) {
         <span className="flex items-center gap-1">
           <span
             className={`inline-block w-2 h-2 rounded-full ${
-              ntrip?.connected ? 'bg-green-400 shadow-[0_0_6px_#4f4]' : 'bg-red-500 shadow-[0_0_6px_#f44]'
+              ntrip?.connected && !errorDescription ? 'bg-green-400 shadow-[0_0_6px_#4f4]' : 'bg-red-500 shadow-[0_0_6px_#f44]'
             }`}
           />
           <span
-            className={`text-[10px] ${ntrip?.connected ? 'text-green-400' : 'text-red-400'}`}
+            className={`text-[10px] ${ntrip?.connected && !errorDescription ? 'text-green-400' : 'text-red-400'}`}
             title={ntrip?.last_error ?? undefined}
           >
             {statusText}
@@ -85,7 +87,7 @@ export default function NtripToggle({ ntrip, onSwitch }: Props) {
           );
         })}
       </div>
-      {errorDescription && !ntrip?.connected && (
+      {errorDescription && (
         <div
           className="mt-2 truncate px-1 text-[11px] text-red-300"
           title={ntrip?.last_error ?? undefined}

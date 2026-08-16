@@ -1,5 +1,9 @@
 import { LatLng } from './types';
 
+export const METERS_TO_FEET = 3.280839895;
+export const feetFromMeters = (m: number) => m * METERS_TO_FEET;
+export const metersFromFeet = (ft: number) => ft / METERS_TO_FEET;
+
 const R = 6371000;
 const toRad = (d: number) => (d * Math.PI) / 180;
 const toDeg = (r: number) => (r * 180) / Math.PI;

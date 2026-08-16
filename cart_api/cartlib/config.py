@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import glob
 import os
+from typing import Optional
 
 # --------------------------------------------------------------------------
 # Serial port discovery
@@ -162,6 +163,35 @@ def find_gps_port() -> str:
     if os.path.exists(GPS_BRIDGE):
         return GPS_BRIDGE
     return _resolve_by_id(GPS_ID_HINTS, GPS_FALLBACK, allow_any_acm=False)
+
+
+def is_gps_bridge(port: Optional[str] = None) -> bool:
+    """True when GPS is the Pi USB-gadget UART bridge, not a native u-blox CDC.
+
+    The gadget is a full-duplex ACM: NMEA comes up UART1 and RTCM can go back
+    down the same tty. Native USB config keys (USBINPROT_*) do nothing on this
+    path; UART1 input-protocol keys do.
+    """
+    p = port or ""
+    if not p:
+        return os.path.exists(GPS_BRIDGE)
+    try:
+        real = os.path.realpath(p)
+        bridge_real = (os.path.realpath(GPS_BRIDGE)
+                       if os.path.exists(GPS_BRIDGE) else GPS_BRIDGE)
+    except OSError:
+        real, bridge_real = p, GPS_BRIDGE
+    if "gps-bridge" in p or real == bridge_real:
+        return True
+    try:
+        for name in os.listdir(_BY_ID_DIR):
+            if "CDC_Composite_Gadget" in name:
+                gadget = os.path.realpath(os.path.join(_BY_ID_DIR, name))
+                if gadget == real:
+                    return True
+    except OSError:
+        pass
+    return False
 
 
 def find_odrive_port() -> str:

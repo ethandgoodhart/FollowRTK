@@ -1,0 +1,13 @@
+[Unit]
+Description=Bidirectional u-blox UART <-> USB gadget GPS bridge
+After=dev-ttyGS0.device
+BindsTo=dev-ttyGS0.device
+
+[Service]
+Type=simple
+ExecStart=/usr/local/sbin/pi_gps_bridge.sh
+Restart=always
+RestartSec=1
+
+[Install]
+WantedBy=multi-user.target

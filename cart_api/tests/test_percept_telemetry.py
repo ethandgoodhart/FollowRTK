@@ -103,6 +103,13 @@ def test_the_furniture_the_minimap_draws_is_present_and_sane():
     assert p["stopping_distance_m"] > 0
 
 
+def test_mount_geometry_is_included_when_supplied():
+    p = payload_for([], EgoPose(0, 0, 0.0, 2.4), height_m=1.783, pitch_deg=15.0)
+    assert p["height_m"] == pytest.approx(1.783)
+    assert p["pitch_deg"] == pytest.approx(15.0)
+    assert "preview_jpeg" not in p
+
+
 def test_stopping_distance_tracks_the_actual_speed():
     cfg = PolicyConfig()
     slow = payload_for([], EgoPose(0, 0, 0.0, 0.5), cfg)["stopping_distance_m"]

@@ -26,7 +26,7 @@ export default function RoutePanel({ route, onSelectEnd, onClear, cornerCut, onC
   const hasRoute = route.path.length >= 2;
 
   return (
-    <div className="absolute bottom-3 left-3 z-10 w-64 rounded-xl bg-neutral-900/90 backdrop-blur-md p-4 text-sm text-neutral-200 shadow-lg border border-neutral-800">
+    <div className="w-64 rounded-xl bg-neutral-900/90 backdrop-blur-md p-4 text-sm text-neutral-200 shadow-lg border border-neutral-800">
       <h3 className="text-xs font-semibold uppercase tracking-wide text-neutral-500 mb-3">Route</h3>
 
       <div className="flex items-center gap-2 mb-3 text-xs">

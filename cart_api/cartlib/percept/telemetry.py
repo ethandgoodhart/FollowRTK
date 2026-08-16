@@ -56,7 +56,9 @@ def perception_payload(tracks: Sequence[Track], decision: SpeedDecision,
                        ego: EgoPose, cfg: Optional[PolicyConfig] = None,
                        detector_hz: float = 0.0, frame_age_s: float = 0.0,
                        ts: float = 0.0, shadow: bool = True,
-                       fov_deg: float = 0.0) -> dict:
+                       fov_deg: float = 0.0,
+                       height_m: Optional[float] = None,
+                       pitch_deg: Optional[float] = None) -> dict:
     """The whole perception state, ready for ``json.dumps``.
 
     ``shadow`` says whether this decision is actually being applied to the cart
@@ -66,7 +68,7 @@ def perception_payload(tracks: Sequence[Track], decision: SpeedDecision,
     """
     cfg = cfg or PolicyConfig()
     conflict_ids = frozenset(c.track_id for c in decision.conflicts)
-    return {
+    payload = {
         "ts": ts,
         "shadow": shadow,
         "detector_hz": round(detector_hz, 1),
@@ -84,3 +86,8 @@ def perception_payload(tracks: Sequence[Track], decision: SpeedDecision,
         "decision": decision.to_dict(),
         "tracks": [track_payload(t, ego, conflict_ids) for t in tracks],
     }
+    if height_m is not None:
+        payload["height_m"] = round(float(height_m), 3)
+    if pitch_deg is not None:
+        payload["pitch_deg"] = round(float(pitch_deg), 2)
+    return payload

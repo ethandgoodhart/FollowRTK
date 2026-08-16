@@ -64,6 +64,7 @@ class Publisher:
         self.clients: set = set()
         self.loop: asyncio.AbstractEventLoop | None = None
         self._thread: threading.Thread | None = None
+        self.on_command = None  # optional Callable[[dict], None]
 
     def start(self) -> "Publisher":
         self._thread = threading.Thread(target=self._serve, daemon=True)
@@ -80,8 +81,15 @@ class Publisher:
         async def handler(ws):
             self.clients.add(ws)
             try:
-                async for _ in ws:
-                    pass
+                async for raw in ws:
+                    if not self.on_command:
+                        continue
+                    try:
+                        msg = json.loads(raw)
+                    except (ValueError, TypeError):
+                        continue
+                    if msg.get("type") == "camera_mount":
+                        self.on_command(msg)
             except Exception:
                 pass
             finally:
@@ -164,6 +172,8 @@ def main() -> int:
                             cap_width=cam.width, cap_height=cam.height,
                             cap_fps=calib_mod.capture_fps(calib),
                             cam_device=args.device)
+    pub.on_command = lambda msg: svc.set_mount(
+        height_m=msg.get("height_m"), pitch_deg=msg.get("pitch_deg"))
     print(f"[live] loading {args.model} @ {args.imgsz} ...")
     try:
         svc.start()

@@ -20,6 +20,7 @@ import NtripToggle from './NtripToggle';
 import RoutePanel from './RoutePanel';
 import DriveControl from './DriveControl';
 import DetectionMinimap from './DetectionMinimap';
+import CameraFeed from './CameraFeed';
 
 interface Props {
   rawAnnotations: RawAnnotations;
@@ -38,7 +39,7 @@ export default function DriveApp({ rawAnnotations }: Props) {
   // for routing; drawing them yellow would double-draw every connector (raw
   // blue + distorted yellow) — that was the visual regression vs live.
   const { laneBoundaries, connectorBoundaries, laneCenterLines, connCenterLines, graph } = useAnnotations(rawAnnotations);
-  const { position, isConnected, getHistory, historyVersion, follow, ntrip, sendCommand, remoteRoute, perception } = useGps(wsUrl);
+  const { position, isConnected, getHistory, historyVersion, follow, ntrip, sendCommand, remoteRoute, perception, cameraMount } = useGps(wsUrl);
   const { speedMph, speed } = useSpeed(getHistory, historyVersion);
   const route = useRoute(graph, position, speed, laneCenterLines, connCenterLines, cornerCut);
 
@@ -119,14 +120,17 @@ export default function DriveApp({ rawAnnotations }: Props) {
         <NtripToggle ntrip={ntrip} onSwitch={(provider) => sendCommand({ type: 'ntrip', provider })} />
         <GpsInfoPanel position={position} speed={speedMph} isConnected={isConnected} />
       </div>
-      <RoutePanel
-        route={route}
-        onSelectEnd={route.selectEnd}
-        onClear={route.clearRoute}
-        cornerCut={cornerCut}
-        onCornerCutChange={setCornerCut}
-      />
-      <DetectionMinimap perception={perception} />
+      <div className="absolute bottom-3 left-3 z-10 flex items-end gap-2">
+        <RoutePanel
+          route={route}
+          onSelectEnd={route.selectEnd}
+          onClear={route.clearRoute}
+          cornerCut={cornerCut}
+          onCornerCutChange={setCornerCut}
+        />
+        <DetectionMinimap perception={perception} />
+        <CameraFeed perception={perception} cameraMount={cameraMount} sendCommand={sendCommand} />
+      </div>
       <DriveControl route={route} follow={follow} speedMph={speedMph} isConnected={isConnected} sendCommand={sendCommand} lockRoute={lockRoute} onToggleLockRoute={setLockRoute} autoStartToken={autoStartToken} />
     </div>
   );

@@ -12,6 +12,7 @@ export function useGps(wsUrl: string) {
   const [ntrip, setNtrip] = useState<NtripStatus | null>(null);
   const [remoteRoute, setRemoteRoute] = useState<RemoteRoute | null>(null);
   const [perception, setPerception] = useState<PerceptionState | null>(null);
+  const [cameraMount, setCameraMount] = useState<{ height_m: number; pitch_deg: number } | null>(null);
   const historyRef = useRef<GpsPosition[]>([]);
   const remoteSeqRef = useRef(0);
   const [historyVersion, setHistoryVersion] = useState(0);
@@ -69,7 +70,16 @@ export function useGps(wsUrl: string) {
         } else if (msg.type === 'follow_end') {
           setFollow({ ...(msg.data as FollowState), active: false });
         } else if (msg.type === 'perception') {
-          setPerception(msg.data as PerceptionState);
+          const p = msg.data as PerceptionState;
+          setPerception(p);
+          if (p.height_m != null && p.pitch_deg != null) {
+            setCameraMount({ height_m: p.height_m, pitch_deg: p.pitch_deg });
+          }
+        } else if (msg.type === 'camera') {
+          const d = msg.data as { height_m?: number; pitch_deg?: number };
+          if (d && d.height_m != null && d.pitch_deg != null) {
+            setCameraMount({ height_m: d.height_m, pitch_deg: d.pitch_deg });
+          }
         } else if (msg.type === 'remote_route') {
           // A remote client (companion app) picked a destination. Drop the pin
           // + plan the purple route in the UI, and drive it if autostart is set.
@@ -99,5 +109,5 @@ export function useGps(wsUrl: string) {
     };
   }, [wsUrl]);
 
-  return { position, isConnected, getHistory, historyVersion, follow, ntrip, sendCommand, remoteRoute, perception };
+  return { position, isConnected, getHistory, historyVersion, follow, ntrip, sendCommand, remoteRoute, perception, cameraMount };
 }

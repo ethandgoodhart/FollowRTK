@@ -255,5 +255,16 @@ def test_fov_matches_the_real_camera_geometry():
     assert 55.0 < c.vfov_deg() < 70.0
 
 
+def test_nearest_ground_moves_closer_when_pitched_down():
+    """Pitching the camera down must shrink the blind zone, not grow it."""
+    level = cam(pitch_deg=0.0, height_m=1.5, offset_forward_m=1.6)
+    down = cam(pitch_deg=15.0, height_m=1.5, offset_forward_m=1.6)
+    n_level = level.nearest_ground_m()
+    n_down = down.nearest_ground_m()
+    assert n_level is not None and n_down is not None
+    assert n_down < n_level
+    assert n_down > 0.5
+
+
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-q"]))

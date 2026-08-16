@@ -27,7 +27,8 @@
   "capture": {
     "width": 1600,
     "height": 1200,
-    "fps": 90,
+    "fps": 30,
+    "fps_note": "The sensor advertises 90 fps at this resolution and it does not work -- with both cameras on the same USB hub, requesting 90 delivers ZERO frames and 10 s select() timeouts that look exactly like a wedged device. 30 fps is solid on both cameras. The detector runs at ~30 Hz anyway, so nothing is lost. CameraStream steps down the ladder on its own if even this is too much.",
     "note": "1600x1200 is chosen to MATCH THE CALIBRATED 4:3 ASPECT. Intrinsics are scaled by 1600/640 = 1200/480 = 2.5. This assumes the 640x480 mode is the full sensor field downscaled rather than a crop -- an assumption an outdoor scale-match test could not confirm or refute (the test scene was a blown-out empty road with no usable texture). The ground calibration below is what settles it: if the assumption is wrong, the fitted ranges will not match the tape measure at BOTH near and far markers, and percept_ground_calib.py reports exactly that."
   },
 

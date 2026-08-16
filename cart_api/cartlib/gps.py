@@ -17,6 +17,7 @@ Example
 
 from __future__ import annotations
 
+import os
 import threading
 import time
 from typing import Optional
@@ -35,6 +36,8 @@ FIX_TYPES = {
 }
 
 NAV_RATE_HZ = 10
+_RTCM_CHUNK = 256          # small enough to interleave with NMEA reads
+_RTCM_BACKOFF_S = 2.0
 _UBX_SYNC = b"\xb5\x62"
 
 # CFG-VALSET keys used by u-blox F9 receivers. The port-specific MSGOUT keys
@@ -47,6 +50,11 @@ _CFG_USBINPROT_NMEA = 0x10770002
 _CFG_USBINPROT_RTCM3X = 0x10770004
 _CFG_USBOUTPROT_NMEA = 0x10780002
 _CFG_UART1_BAUDRATE = 0x40520001
+# UART1 input — these are the keys that matter on the Pi gadget bridge, where
+# the u-blox is on UART pins rather than its own USB CDC.
+_CFG_UART1INPROT_UBX = 0x10730001
+_CFG_UART1INPROT_NMEA = 0x10730002
+_CFG_UART1INPROT_RTCM3X = 0x10730004
 
 _NMEA_MSGOUT_UART1 = {
     "GGA": 0x209100BB,
@@ -89,40 +97,57 @@ def _ubx_cfg_valset(keys_values: list[tuple[int, bytes]]) -> bytes:
     return _UBX_SYNC + msg + _ubx_checksum(msg)
 
 
-def _configure_receiver(ser: serial.Serial) -> bool:
+def _configure_receiver(ser: serial.Serial, uart_bridge: bool = False) -> bool:
     """Push nav-rate/message config to the receiver. Returns False if the
-    downlink is dead (read-only bridge), so callers can stop retrying."""
+    write timed out, so callers can stop retrying the config (not RTCM).
+
+    On the Pi USB-gadget bridge the u-blox sits on UART1, so USB protocol keys
+    are noise and a baud-rate VALSET can desync the Pi's UART. The gadget ACM
+    is full duplex: NMEA comes up and RTCM goes back down the same tty. Config
+    failure therefore must not be treated as "corrections are impossible".
+    """
     meas_period_ms = int(1000 / NAV_RATE_HZ)
     msg_rates: list[tuple[int, bytes]] = [
         (_CFG_RATE_MEAS, meas_period_ms.to_bytes(2, "little")),
         (_CFG_RATE_NAV, (1).to_bytes(2, "little")),
-        (_CFG_UART1_BAUDRATE, config.GPS_BAUD.to_bytes(4, "little")),
-        (_CFG_USBINPROT_UBX, b"\x01"),
-        (_CFG_USBINPROT_NMEA, b"\x01"),
-        (_CFG_USBINPROT_RTCM3X, b"\x01"),
-        (_CFG_USBOUTPROT_NMEA, b"\x01"),
     ]
-    for outputs in (_NMEA_MSGOUT_UART1, _NMEA_MSGOUT_USB):
+    if uart_bridge:
+        # Enable RTCM3 (and UBX/NMEA) on UART1 so NTRIP bytes are accepted.
+        # Do not touch UART1 baud: the Pi and the receiver already agree.
+        msg_rates += [
+            (_CFG_UART1INPROT_UBX, b"\x01"),
+            (_CFG_UART1INPROT_NMEA, b"\x01"),
+            (_CFG_UART1INPROT_RTCM3X, b"\x01"),
+        ]
+        outputs_nmea = (_NMEA_MSGOUT_UART1,)
+        outputs_ubx = (_UBX_MSGOUT_UART1,)
+    else:
+        msg_rates += [
+            (_CFG_UART1_BAUDRATE, config.GPS_BAUD.to_bytes(4, "little")),
+            (_CFG_USBINPROT_UBX, b"\x01"),
+            (_CFG_USBINPROT_NMEA, b"\x01"),
+            (_CFG_USBINPROT_RTCM3X, b"\x01"),
+            (_CFG_USBOUTPROT_NMEA, b"\x01"),
+        ]
+        outputs_nmea = (_NMEA_MSGOUT_UART1, _NMEA_MSGOUT_USB)
+        outputs_ubx = (_UBX_MSGOUT_UART1, _UBX_MSGOUT_USB)
+    for outputs in outputs_nmea:
         for name, key in outputs.items():
             msg_rates.append((key, b"\x01" if name == "GGA" else b"\x00"))
-    for outputs in (_UBX_MSGOUT_UART1, _UBX_MSGOUT_USB):
+    for outputs in outputs_ubx:
         for key in outputs.values():
             msg_rates.append((key, b"\x00"))
 
-    # The Pi USB-gadget bridge is receive-only (u-blox -> host); host -> receiver
-    # bytes never drain and the write blocks forever. Treat a failed config as
-    # non-fatal so we still get the NMEA stream (RTK corrections won't reach the
-    # receiver over such a link — that needs a direct u-blox USB connection).
     # No ser.flush() here: tcdrain is not covered by write_timeout and can
-    # block indefinitely if the bridge stalls; the sleep below is enough for
+    # block indefinitely if the gadget stalls; the sleep below is enough for
     # the config to reach the receiver.
     try:
         ser.write(_ubx_cfg_valset(msg_rates))
     except Exception:
         return False
-    time.sleep(0.25)
-    if ser.in_waiting:
-        ser.read(ser.in_waiting)
+    # Don't sleep/drain here: UBX ACKs mix into the NMEA stream and the reader
+    # already ignores non-ASCII. Sleeping while holding the I/O lock is what
+    # used to stall the 10 Hz GGA feed.
     return True
 
 
@@ -172,14 +197,16 @@ class GpsReceiver:
         self._io_lock = threading.RLock()
         self._latest: Optional[dict] = None
         self._fix_count = 0
-        # Set False once the downlink to the receiver proves dead (read-only Pi
-        # bridge). Keeps NTRIP from re-blocking the I/O lock on every RTCM chunk,
-        # which starved the reader from 10 Hz down to 0.1 Hz.
+        # Set False only after RTCM writes themselves keep timing out. A failed
+        # UBX config is not that: the Pi gadget is full duplex, and USB-protocol
+        # VALSETs simply do not apply on UART1.
         self.corrections_supported = True
         self._write_failures = 0
         # Once the UBX config write proves impossible, stop retrying it: every
-        # reopen would otherwise burn a full write_timeout inside the I/O lock.
+        # reopen would otherwise burn a write_timeout inside the I/O lock.
         self._config_supported = True
+        self._config_pending = False
+        self._rtcm_backoff_until = 0.0
         # Allow callers/NTRIP to grab the raw serial handle to send GGA back.
         self.last_gga_raw: Optional[str] = None
 
@@ -234,51 +261,82 @@ class GpsReceiver:
         return self.latest
 
     def write_corrections(self, data: bytes) -> None:
-        """Write RTCM correction bytes to the receiver, reopening the USB serial
-        port once if the device briefly disconnected/re-enumerated."""
+        """Write RTCM to the receiver without stalling the NMEA reader.
+
+        Two Jetson-side traps this has to dodge:
+
+        * pyserial's ``write()`` uses ``select()`` for ``write_timeout``. Linux
+          CDC ACM often reports not-writable even when the gadget will take
+          bytes, which we used to treat as a dead downlink.
+        * Holding the I/O lock across a multi-kilobyte write lets GGA fill the
+          USB IN buffer and deadlocks a bidirectional Pi bridge.
+
+        Chunk, drop the lock between chunks, and ``os.write`` the tty fd.
+        """
         if not data:
             return
-        if not self.corrections_supported:
+        now = time.monotonic()
+        if now < self._rtcm_backoff_until:
             raise RuntimeError(
-                "receiver downlink is read-only — RTCM corrections cannot be "
-                "delivered (u-blox must be connected directly by USB)")
-        try:
-            with self._io_lock:
-                if not self._ser or not self._ser.is_open:
-                    self._open_serial_locked()
-                self._ser.write(data)
+                "Pi GPS bridge is not forwarding RTCM (USB downlink buffer full)")
+        offset = 0
+        stalls = 0
+        while offset < len(data):
+            chunk = data[offset:offset + _RTCM_CHUNK]
+            try:
+                with self._io_lock:
+                    if not self._ser or not self._ser.is_open:
+                        self._open_serial_locked()
+                    n = self._write_chunk_locked(chunk)
+                offset += n if n else len(chunk)
+                stalls = 0
                 self._write_failures = 0
-        except Exception as first_error:
-            with self._io_lock:
-                self._close_serial_locked()
-                try:
-                    self._open_serial_locked()
-                    self._ser.write(data)
-                except Exception as second_error:
-                    self._close_serial_locked()
+                self.corrections_supported = True
+            except Exception as err:
+                stalls += 1
+                if stalls >= 3:
                     self._write_failures += 1
-                    if self._write_failures >= 2:
-                        self.corrections_supported = False
-                        print("[gps] downlink to receiver is dead after "
-                              f"{self._write_failures} attempts; disabling RTCM "
-                              "writes so they stop stalling the NMEA reader")
+                    self._rtcm_backoff_until = time.monotonic() + _RTCM_BACKOFF_S
                     raise RuntimeError(
-                        f"GPS serial write failed after reconnect: {second_error}"
-                    ) from first_error
+                        "Pi GPS bridge is not forwarding RTCM "
+                        f"(USB downlink buffer full: {err})") from err
+                time.sleep(0.01)
+
+    def _write_chunk_locked(self, chunk: bytes) -> int:
+        fileno = getattr(self._ser, "fileno", None)
+        fd = fileno() if callable(fileno) else None
+        if fd is None:
+            n = self._ser.write(chunk)
+            return n if n else len(chunk)
+        try:
+            return os.write(fd, chunk)
+        except BlockingIOError as e:
+            raise TimeoutError("GPS serial write would block") from e
 
     # -- internals ---------------------------------------------------------
     def _open_serial_locked(self) -> None:
         self.port = self._requested_port or config.find_gps_port()
-        # write_timeout matters: on a read-only bridge an unbounded write blocks
-        # the whole startup path (see _configure_receiver).
-        self._ser = serial.Serial(self.port, self.baud, timeout=1, write_timeout=3)
+        self._ser = serial.Serial(
+            self.port, self.baud, timeout=1, write_timeout=1.0,
+            rtscts=False, dsrdtr=False, xonxoff=False)
+        try:
+            self._ser.dtr = True
+            self._ser.rts = True
+        except Exception:
+            pass
+        # Pi gadget: never send UBX VALSETs. USB-protocol keys do nothing on
+        # UART1, a failed write used to disable RTCM, and the VALSET itself
+        # can fill the gadget OUT buffer before NTRIP starts. F9 UART1 already
+        # accepts RTCM3 by default.
+        if config.is_gps_bridge(self.port):
+            self._config_pending = False
+            return
         if self._config_supported:
-            if not _configure_receiver(self._ser):
+            if not _configure_receiver(self._ser, uart_bridge=False):
                 self._config_supported = False
-                self.corrections_supported = False
-                print("[gps] receiver config write failed — link is read-only. "
-                      f"Receiver stays at its default rate (not {NAV_RATE_HZ} Hz) "
-                      "and RTCM corrections are disabled.")
+                print("[gps] receiver config write failed — leaving the "
+                      f"receiver at its default rate (not {NAV_RATE_HZ} Hz). "
+                      "RTCM writes will still be attempted.")
 
     def _close_serial_locked(self) -> None:
         if self._ser:

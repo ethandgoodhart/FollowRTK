@@ -1,6 +1,7 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
+import { feetFromMeters, metersFromFeet } from '@/lib/geo';
 import { PerceptionState, PerceptionTrack } from '@/lib/types';
 
 /**
@@ -10,7 +11,7 @@ import { PerceptionState, PerceptionTrack } from '@/lib/types';
  * Two design decisions worth knowing about:
  *
  *  - It draws UNCERTAINTY, not points. Each track is a disc sized by the
- *    radius the policy actually avoids, so a badly-ranged object at 25 m looks
+ *    radius the policy actually avoids, so a badly-ranged object at 80 ft looks
  *    as vague as it is. A minimap of confident dots would imply a precision
  *    monocular ranging does not have, and the operator would learn to trust it
  *    more than it deserves.
@@ -43,14 +44,17 @@ const C = SIZE / 2;                     // centre
 const PAD = 14;                         // room for the outer ring label
 const R = C - PAD;                      // outer ring radius, px
 
-/** Rings chosen to bracket the distances that matter: reflex, stop, horizon. */
-function ringsFor(rangeM: number): number[] {
-  return [5, 10, 20, 30, 40].filter((r) => r <= rangeM);
+/** Rings in feet, chosen to bracket the distances that matter: reflex, stop, horizon. */
+function ringsFtFor(rangeM: number): number[] {
+  const rangeFt = feetFromMeters(rangeM);
+  return [10, 20, 40, 60, 80, 100].filter((ft) => ft <= rangeFt + 0.5);
+}
+
+function fmtFt(m: number, digits = 0): string {
+  return `${feetFromMeters(m).toFixed(digits)}ft`;
 }
 
 export default function DetectionMinimap({ perception }: { perception: PerceptionState | null }) {
-  const [open, setOpen] = useState(true);
-
   const p = perception;
   const rangeM = p?.range_m && p.range_m > 0 ? p.range_m : 30;
   const toPx = useMemo(() => (m: number) => (m / rangeM) * R, [rangeM]);
@@ -61,18 +65,6 @@ export default function DetectionMinimap({ perception }: { perception: Perceptio
   const stale = !p || (Date.now() / 1000 - p.ts) > 2.0;
   const layer = LAYER_STYLE[p?.decision.layer ?? 'clear'] ?? LAYER_STYLE.clear;
 
-  if (!open) {
-    return (
-      <button
-        onClick={() => setOpen(true)}
-        className="absolute bottom-3 left-3 z-10 rounded-lg bg-neutral-900/85 px-3 py-2 text-xs
-                   font-medium text-neutral-200 ring-1 ring-neutral-700 backdrop-blur"
-      >
-        detections {p ? `(${p.tracks.length})` : ''}
-      </button>
-    );
-  }
-
   const fov = p?.fov_deg ?? 0;
   const halfFov = (fov / 2) * (Math.PI / 180);
   // Wedge covering everything the camera CANNOT see, drawn as two arcs.
@@ -80,7 +72,7 @@ export default function DetectionMinimap({ perception }: { perception: Perceptio
   const fovEdgeR = { x: C + R * Math.sin(halfFov), y: C - R * Math.cos(halfFov) };
 
   return (
-    <div className="absolute bottom-3 left-3 z-10 w-[286px] rounded-xl bg-neutral-900/85
+    <div className="w-[286px] rounded-xl bg-neutral-900/85
                     p-3 text-neutral-200 ring-1 ring-neutral-700 backdrop-blur">
       {/* header ------------------------------------------------------------ */}
       <div className="mb-2 flex items-center justify-between gap-2">
@@ -95,9 +87,9 @@ export default function DetectionMinimap({ perception }: { perception: Perceptio
             </span>
           )}
         </div>
-        <button onClick={() => setOpen(false)} className="text-xs text-neutral-500 hover:text-neutral-300">
-          hide
-        </button>
+        <span className="text-[10px] font-semibold uppercase tracking-wide text-neutral-500">
+          detections
+        </span>
       </div>
 
       {/* radar ------------------------------------------------------------- */}
@@ -118,12 +110,15 @@ export default function DetectionMinimap({ perception }: { perception: Perceptio
         )}
 
         {/* range rings */}
-        {ringsFor(rangeM).map((m) => (
-          <g key={m}>
-            <circle cx={C} cy={C} r={toPx(m)} fill="none" stroke="#3f3f46" strokeWidth={1} />
-            <text x={C + 3} y={C - toPx(m) + 10} fontSize={8} fill="#71717a">{m}m</text>
-          </g>
-        ))}
+        {ringsFtFor(rangeM).map((ft) => {
+          const m = metersFromFeet(ft);
+          return (
+            <g key={ft}>
+              <circle cx={C} cy={C} r={toPx(m)} fill="none" stroke="#3f3f46" strokeWidth={1} />
+              <text x={C + 3} y={C - toPx(m) + 10} fontSize={8} fill="#71717a">{ft}ft</text>
+            </g>
+          );
+        })}
         <circle cx={C} cy={C} r={R} fill="none" stroke="#52525b" strokeWidth={1.5} />
 
         {/* near blind zone: the camera cannot see the ground in here at all */}
@@ -141,7 +136,7 @@ export default function DetectionMinimap({ perception }: { perception: Perceptio
                   stroke="#f87171" strokeWidth={1.5} />
             <text x={C + 10} y={C - toPx(p.stopping_distance_m) + 3}
                   fontSize={8} fill="#f87171">
-              stop {p.stopping_distance_m.toFixed(1)}m
+              stop {fmtFt(p.stopping_distance_m)}
             </text>
           </>
         )}
@@ -218,11 +213,9 @@ function TrackGlyph({ t, at, toPx }: {
         <circle cx={x} cy={y} r={r + 3} fill="none" stroke="#fbbf24"
                 strokeWidth={1} strokeDasharray="2 3" />
       )}
-      {t.conflict && (
-        <text x={x + r + 3} y={y + 3} fontSize={8} fill="#fca5a5">
-          {t.cls} {t.forward_m.toFixed(1)}m
-        </text>
-      )}
+      <text x={x + r + 3} y={y + 3} fontSize={8} fill={t.conflict ? '#fca5a5' : color}>
+        {t.cls} {fmtFt(t.forward_m)}
+      </text>
     </g>
   );
 }

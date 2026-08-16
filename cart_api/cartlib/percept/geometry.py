@@ -125,6 +125,16 @@ class CameraModel:
         th = math.radians(self.pitch_deg if pitch_deg is None else pitch_deg)
         return self.cy - self.fy * math.tan(th)
 
+    def nearest_ground_m(self) -> Optional[float]:
+        """Forward range from the cart origin to the nearest visible ground.
+
+        The bottom-centre pixel is the closest ground the camera can see; the
+        mount offset then puts that in the same frame the follower uses. None
+        if even the bottom row is on or above the horizon (aimed too high).
+        """
+        pt = self.ground_point(self.width / 2.0, float(self.height - 1))
+        return None if pt is None else pt[0]
+
     def hfov_deg(self) -> float:
         return 2.0 * math.degrees(math.atan(self.width / (2.0 * self.fx)))
 

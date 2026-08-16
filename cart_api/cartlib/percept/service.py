@@ -37,7 +37,6 @@ degrades rather than guessing.
 
 from __future__ import annotations
 
-import math
 import threading
 import time
 from typing import Callable, List, Optional, Sequence, Tuple
@@ -46,7 +45,8 @@ from .. import geo
 from .camera import CameraStream
 from .detector import Detector
 from .geometry import CameraModel, project_detection
-from .policy import MPS_TO_MPH, Governor, PolicyConfig
+from .policy import Governor, PolicyConfig, SpeedDecision
+from .preview import encode_preview
 from .telemetry import perception_payload
 from .track import EgoPose, Tracker
 
@@ -181,7 +181,53 @@ class PerceptionService:
         return (self.error is None and self.stream.healthy
                 and time.monotonic() - self._last_tick < 1.0)
 
+    def mount_snapshot(self) -> dict:
+        return {
+            "height_m": round(self.cam.height_m, 3),
+            "pitch_deg": round(self.cam.pitch_deg, 2),
+            "blind_zone_m": round(self.cfg.blind_zone_m, 2),
+        }
+
+    def set_mount(self, height_m=None, pitch_deg=None) -> dict:
+        """Live-tune the mount. Does not write calibration; ranges update now.
+
+        Height and pitch are what turn a pixel row into metres, so the operator
+        needs to be able to nudge them while looking at the camera feed (the
+        drawn horizon should sit on the real one) without restarting the stack.
+        """
+        if height_m is not None:
+            try:
+                self.cam.height_m = max(0.5, min(float(height_m), 4.0))
+            except (TypeError, ValueError):
+                pass
+        if pitch_deg is not None:
+            try:
+                self.cam.pitch_deg = max(-5.0, min(float(pitch_deg), 40.0))
+            except (TypeError, ValueError):
+                pass
+        near = self.cam.nearest_ground_m()
+        if near is not None and near > 0.2:
+            self.cfg.blind_zone_m = round(near, 2)
+            self.cfg.reflex_range_m = round(near + 1.0, 2)
+        return {"ok": True, **self.mount_snapshot()}
+
     # -- the thread -------------------------------------------------------
+    def _publish(self, tracks, decision: SpeedDecision, ego: EgoPose,
+                 frame_age: float, jpeg: str) -> None:
+        try:
+            payload = perception_payload(
+                tracks, decision, ego, self.cfg,
+                detector_hz=self.hz, frame_age_s=frame_age,
+                ts=time.time(), shadow=self.shadow,
+                fov_deg=self.cam.hfov_deg(),
+                height_m=self.cam.height_m,
+                pitch_deg=self.cam.pitch_deg)
+            if jpeg:
+                payload["preview_jpeg"] = jpeg
+            self.publish(payload)
+        except Exception as e:               # never kill the loop
+            print(f"[percept] publish failed: {e}")
+
     def _run(self) -> None:
         last_pub = 0.0
         last_frame_ts = -1.0
@@ -204,17 +250,26 @@ class PerceptionService:
 
                 now = time.monotonic()
                 frame_age = max(0.0, now - cap_ts)
+                dt = min(max(now - prev, 1e-3), 0.5)
+                prev = now
+                self.hz = 0.9 * self.hz + 0.1 * (1.0 / dt)
+
+                want_pub = bool(self.publish) and (now - last_pub) >= self.publish_period
+                jpeg = encode_preview(frame, dets_raw, self.cam) if want_pub else ""
 
                 if ego is None or now - ctx_ts > 1.0:
                     # No usable pose: we can see, but we cannot say where any of
-                    # it is in the world, so tracking would be nonsense. Publish
-                    # the fact rather than inventing a pose.
-                    self._set_output(None, {"layer": "degraded",
-                                            "reason": "no GPS pose for perception",
-                                            "v_allowed_mph": 0.0,
-                                            "emergency": False, "degraded": True,
-                                            "limiting_track_id": None,
-                                            "conflicts": []}, now)
+                    # it is in the world, so tracking would be nonsense. Still
+                    # publish the camera preview — the operator is usually
+                    # tuning the mount on a parked cart with a stale/missing fix.
+                    dec = SpeedDecision(v_allowed_mph=0.0,
+                                        reason="no GPS pose for perception",
+                                        degraded=True, layer="degraded")
+                    self._set_output(None, dec.to_dict(), now)
+                    if want_pub:
+                        last_pub = now
+                        self._publish([], dec, EgoPose(0, 0, 0, 0, now),
+                                      frame_age, jpeg)
                     continue
 
                 dets = []
@@ -224,24 +279,15 @@ class PerceptionService:
                         dets.append(d)
 
                 tracks = self.tracker.update(dets, ego, now)
-                dt = min(max(now - prev, 1e-3), 0.5)
-                prev = now
                 v = self.governor.step(tracks, route_xy, ego, now, dt,
                                        detector_ok=self.detector.loaded,
                                        frame_age_s=frame_age)
-                self.hz = 0.9 * self.hz + 0.1 * (1.0 / dt)
                 self._set_output(v, self.governor.decision.to_dict(), now)
 
-                if self.publish and (now - last_pub) >= self.publish_period:
+                if want_pub:
                     last_pub = now
-                    try:
-                        self.publish(perception_payload(
-                            tracks, self.governor.decision, ego, self.cfg,
-                            detector_hz=self.hz, frame_age_s=frame_age,
-                            ts=time.time(), shadow=self.shadow,
-                            fov_deg=self.cam.hfov_deg()))
-                    except Exception as e:               # never kill the loop
-                        print(f"[percept] publish failed: {e}")
+                    self._publish(tracks, self.governor.decision, ego,
+                                  frame_age, jpeg)
         except Exception as e:
             self.error = f"{type(e).__name__}: {e}"
             print(f"[percept] thread died: {self.error}")
